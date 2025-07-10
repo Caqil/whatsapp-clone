@@ -1,22 +1,8 @@
-// src/types/auth.ts - Fixed types to match backend
-export interface User {
-  id: string;
-  username: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  phone?: string;
-  bio?: string;
-  isOnline: boolean;
-  isVerified: boolean;
-  verifiedAt?: string;
-  lastLoginAt?: string;
-  loginMethod?: string;
-  createdAt: string;
-  updatedAt: string;
-}
+
 
 // ========== Magic Link Authentication ==========
+
+import { User } from "./user";
 
 export interface MagicLinkRequest {
   email: string;
@@ -53,6 +39,7 @@ export interface QRCodeResponse {
   qrCode: string;
   secret: string;
   expiresAt: string;
+  qrCodeDataUrl?: string; // Base64 encoded QR code image
 }
 
 export interface QRCodeScanRequest {

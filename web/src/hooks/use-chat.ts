@@ -1,148 +1,68 @@
-// src/hooks/use-chat.ts - Final simplified version matching Go API
-'use client';
-
-import { useState, useEffect, useCallback, useRef } from 'react';
-import type {
-  Chat,
-  ChatWithUsers,
-  CreateChatRequest,
-} from '@/types/chat';
-import type {
-  Message,
-  MessageWithUser,
-  SendMessageRequest,
-  MessageType,
-  MessageReactionRequest,
-  ForwardMessageRequest,
-  DeleteMessageRequest,
-  MessageResponse,
-  ReactionType
-} from '@/types/message';
-import type { UploadResult } from '@/types/api';
-import { chatApi, messageApi, fileApi } from '@/lib/api';
-import { useSocket } from './use-socket';
-import { useAuth } from './use-auth';
+// Fixed useChat hook - addresses forEach and find errors
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useAuth } from '@/hooks/use-auth';
+import { useSocket } from '@/hooks/use-socket';
 import { toast } from 'sonner';
+import type { 
+  Chat, 
+  ChatWithUsers, 
+  CreateChatRequest 
+} from '@/types/chat';
+import type { 
+  Message, 
+  MessageWithUser, 
+  MessageResponse,
+  MessageType,
+  MessageStatus,
+  ReactionType 
+} from '@/types/message';
+import { chatApi, messageApi } from '@/lib/api';
 
-interface UseChatState {
-  // Chat list
+interface ChatState {
   chats: ChatWithUsers[];
+  currentChat: ChatWithUsers | null;
+  currentChatId: string | null;
+  messages: Map<string, MessageWithUser>;
   isLoading: boolean;
+  isLoadingMessages: boolean;
+  isUploading: boolean;
+  hasMoreMessages: boolean;
+  messageOffset: number;
+  typingUsers: Map<string, string[]>;
+  searchResults: MessageWithUser[];
   error: string | null;
   lastUpdated: string | null;
-  
-  // Current chat
-  currentChatId: string | null;
-  currentChat: ChatWithUsers | null;
-  
-  // Messages
-  messages: Map<string, MessageWithUser>;
-  hasMoreMessages: boolean;
-  isLoadingMessages: boolean;
-  messageOffset: number;
-  
-  // Typing indicators
-  typingUsers: Set<string>;
-  isTyping: boolean;
-  
-  // Search and media
-  searchResults: MessageWithUser[];
-  isSearching: boolean;
-  mediaMessages: Map<string, MessageWithUser[]>;
-  
-  // Upload state
-  uploadProgress: Map<string, number>;
-  isUploading: boolean;
 }
 
-interface UseChatActions {
-  // Chat Management
-  createDirectChat: (participantId: string) => Promise<Chat>;
-  createGroupChat: (name: string, participantIds: string[], description?: string) => Promise<Chat>;
-  loadChats: () => Promise<ChatWithUsers[]>;
-  switchChat: (chatId: string | null) => Promise<void>;
-  
-  // Message Management
-  sendTextMessage: (content: string, replyToId?: string) => Promise<Message>;
-  sendMediaMessage: (file: File, content?: string, replyToId?: string) => Promise<Message>;
-  loadMessages: (limit?: number, offset?: number) => Promise<MessageWithUser[]>;
-  loadMoreMessages: () => Promise<MessageWithUser[]>;
-  refreshMessages: () => Promise<void>;
-  
-  // Message Actions
-  editMessage: (messageId: string, content: string) => Promise<void>;
-  deleteMessage: (messageId: string, deleteForEveryone?: boolean) => Promise<void>;
-  forwardMessages: (messageIds: string[], toChatIds: string[]) => Promise<void>;
-  
-  // Message Status
-  markAsRead: (messageId: string) => Promise<void>;
-  markMultipleAsRead: (messageIds: string[]) => Promise<void>;
-  getUnreadCount: () => Promise<number>;
-  
-  // Reactions
-  addReaction: (messageId: string, reaction: ReactionType) => Promise<void>;
-  removeReaction: (messageId: string, reaction: ReactionType) => Promise<void>;
-  toggleReaction: (messageId: string, reaction: ReactionType) => Promise<void>;
-  
-  // File Upload
-  uploadFile: (file: File, onProgress?: (progress: number) => void) => Promise<UploadResult>;
-  
-  // Search and Media
-  searchMessages: (query: string) => Promise<MessageWithUser[]>;
-  clearSearchResults: () => void;
-  getMediaMessages: (mediaType?: string) => Promise<MessageWithUser[]>;
-  
-  // Typing Indicators
-  startTyping: () => void;
-  stopTyping: () => void;
-  
-  // Utilities
-  getMessageById: (messageId: string) => MessageWithUser | null;
-  getLastMessage: () => MessageWithUser | null;
-  clearError: () => void;
-  retryFailedMessage: (messageId: string) => Promise<void>;
-}
-
-const INITIAL_STATE: UseChatState = {
+const initialState: ChatState = {
   chats: [],
+  currentChat: null,
+  currentChatId: null,
+  messages: new Map(),
   isLoading: false,
+  isLoadingMessages: false,
+  isUploading: false,
+  hasMoreMessages: true,
+  messageOffset: 0,
+  typingUsers: new Map(),
+  searchResults: [],
   error: null,
   lastUpdated: null,
-  
-  currentChatId: null,
-  currentChat: null,
-  
-  messages: new Map(),
-  hasMoreMessages: true,
-  isLoadingMessages: false,
-  messageOffset: 0,
-  
-  typingUsers: new Set(),
-  isTyping: false,
-  
-  searchResults: [],
-  isSearching: false,
-  mediaMessages: new Map(),
-  
-  uploadProgress: new Map(),
-  isUploading: false,
 };
 
-export function useChat(): UseChatState & UseChatActions {
-  const [state, setState] = useState<UseChatState>(INITIAL_STATE);
+export function useChat() {
+  const [state, setState] = useState<ChatState>(initialState);
   const { user } = useAuth();
-  const { socket, isConnected, sendMessage: sendSocketMessage } = useSocket();
-  
-  // Refs for managing timers and state
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const { socket, isConnected } = useSocket();
   const abortControllerRef = useRef<AbortController | null>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | undefined>();
 
   // Helper function to update state
-  const updateState = useCallback((updates: Partial<UseChatState>) => {
+  const updateState = useCallback((updates: Partial<ChatState>) => {
     setState(prev => ({ ...prev, ...updates }));
   }, []);
 
-  // Helper function to add or update a message
+  // Helper function to add/update message
   const addOrUpdateMessage = useCallback((message: MessageWithUser) => {
     setState(prev => {
       const newMessages = new Map(prev.messages);
@@ -151,7 +71,7 @@ export function useChat(): UseChatState & UseChatActions {
     });
   }, []);
 
-  // Helper function to remove a message
+  // Helper function to remove message
   const removeMessage = useCallback((messageId: string) => {
     setState(prev => {
       const newMessages = new Map(prev.messages);
@@ -160,13 +80,12 @@ export function useChat(): UseChatState & UseChatActions {
     });
   }, []);
 
-  // Convert MessageResponse to MessageWithUser (simplified)
+  // Convert message response to MessageWithUser
   const convertMessageResponse = useCallback((msgResponse: MessageResponse): MessageWithUser => {
     const message = msgResponse.message;
-    
     return {
       ...message,
-      senderName: msgResponse.senderName || 'Unknown',
+      senderName: msgResponse.senderName || user?.username || 'Unknown',
       isOwn: message.senderId === user?.id,
       replyToMessage: msgResponse.replyToMessage,
     };
@@ -185,7 +104,7 @@ export function useChat(): UseChatState & UseChatActions {
       
       const chat = await chatApi.createChat(request);
       
-      // For simplicity, reload chats after creation
+      // Reload chats after creation
       await loadChats();
       
       toast.success('Chat created successfully');
@@ -211,7 +130,7 @@ export function useChat(): UseChatState & UseChatActions {
       
       const chat = await chatApi.createChat(request);
       
-      // For simplicity, reload chats after creation
+      // Reload chats after creation
       await loadChats();
       
       toast.success(`Group "${name}" created successfully`);
@@ -230,13 +149,16 @@ export function useChat(): UseChatState & UseChatActions {
       
       const chats = await chatApi.getUserChats();
       
+      // Ensure chats is always an array
+      const chatsArray = Array.isArray(chats) ? chats : [];
+      
       updateState({
-        chats,
+        chats: chatsArray,
         isLoading: false,
         lastUpdated: new Date().toISOString(),
       });
       
-      return chats;
+      return chatsArray;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || 'Failed to load chats';
       updateState({ isLoading: false, error: errorMessage });
@@ -273,9 +195,12 @@ export function useChat(): UseChatState & UseChatActions {
         messageApi.getChatMessages(chatId, 50, 0),
       ]);
 
+      // Ensure messageResponses is always an array
+      const messagesArray = Array.isArray(messageResponses) ? messageResponses : [];
+
       // Convert message responses to MessageWithUser
       const messages = new Map<string, MessageWithUser>();
-      messageResponses.forEach(msgResponse => {
+      messagesArray.forEach(msgResponse => {
         const message = convertMessageResponse(msgResponse);
         messages.set(message.id, message);
       });
@@ -283,12 +208,12 @@ export function useChat(): UseChatState & UseChatActions {
       updateState({
         currentChat: chat,
         messages,
-        hasMoreMessages: messageResponses.length === 50,
+        hasMoreMessages: messagesArray.length === 50,
         isLoadingMessages: false,
       });
 
       // Mark messages as read
-      const unreadMessages = messageResponses
+      const unreadMessages = messagesArray
         .filter(msg => !msg.isRead && msg.message.senderId !== user?.id)
         .map(msg => msg.message.id);
       
@@ -306,29 +231,28 @@ export function useChat(): UseChatState & UseChatActions {
   // ========== Message Management ==========
 
   const sendTextMessage = useCallback(async (content: string, replyToId?: string): Promise<Message> => {
-    if (!state.currentChatId || !content.trim()) {
-      throw new Error('Invalid message data');
+    if (!state.currentChatId) {
+      throw new Error('No chat selected');
     }
 
     try {
-      const request: SendMessageRequest = {
+      const message = await messageApi.sendMessage({
         chatId: state.currentChatId,
+        content,
         type: 'text',
-        content: content.trim(),
         replyToId,
-      };
+      });
 
-      const message = await messageApi.sendMessage(request);
-      
-      // Add to local state immediately
+      // Add to local state
       const messageWithUser: MessageWithUser = {
         ...message,
-        senderName: user?.username || 'You',
+        senderName: user?.username || user?.firstName || 'You',
         isOwn: true,
       };
       
       addOrUpdateMessage(messageWithUser);
       
+      toast.success('Message sent successfully');
       return message;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || 'Failed to send message';
@@ -363,7 +287,7 @@ export function useChat(): UseChatState & UseChatActions {
       // Add to local state
       const messageWithUser: MessageWithUser = {
         ...message,
-        senderName: user?.username || 'You',
+        senderName: user?.username || user?.firstName || 'You',
         isOwn: true,
       };
       
@@ -388,7 +312,10 @@ export function useChat(): UseChatState & UseChatActions {
       
       const messageResponses = await messageApi.getChatMessages(state.currentChatId, limit, offset);
       
-      const messages: MessageWithUser[] = messageResponses.map(convertMessageResponse);
+      // Ensure messageResponses is always an array
+      const messagesArray = Array.isArray(messageResponses) ? messageResponses : [];
+      
+      const messages: MessageWithUser[] = messagesArray.map(convertMessageResponse);
       
       // Update state with new messages
       setState(prev => {
@@ -398,8 +325,8 @@ export function useChat(): UseChatState & UseChatActions {
         return {
           ...prev,
           messages: newMessages,
-          hasMoreMessages: messageResponses.length === limit,
-          messageOffset: offset + messageResponses.length,
+          hasMoreMessages: messagesArray.length === limit,
+          messageOffset: offset + messagesArray.length,
           isLoadingMessages: false,
         };
       });
@@ -542,21 +469,9 @@ export function useChat(): UseChatState & UseChatActions {
         }
       });
     } catch (error) {
-      console.error('Error marking messages as read:', error);
+      console.error('Error marking multiple messages as read:', error);
     }
   }, [state.messages, user, addOrUpdateMessage]);
-
-  const getUnreadCount = useCallback(async (): Promise<number> => {
-    if (!state.currentChatId) return 0;
-    
-    try {
-      const response = await messageApi.getUnreadCount(state.currentChatId);
-      return response.unreadCount || 0;
-    } catch (error) {
-      console.error('Error getting unread count:', error);
-      return 0;
-    }
-  }, [state.currentChatId]);
 
   // ========== Reactions ==========
 
@@ -564,12 +479,12 @@ export function useChat(): UseChatState & UseChatActions {
     try {
       await messageApi.addReaction({ messageId, reaction });
       
-      // Update local message reactions
+      // Update local message
       const message = state.messages.get(messageId);
       if (message && user) {
         const updatedReactions = [
-          ...message.reactions.filter(r => r.userId !== user.id),
-          { userId: user.id, reaction, addedAt: new Date().toISOString() }
+          ...message.reactions.filter(r => r.userId !== user.id || r.reaction !== reaction),
+          { userId: user.id, reaction: reaction, addedAt: new Date().toISOString() }
         ];
         
         addOrUpdateMessage({
@@ -577,10 +492,8 @@ export function useChat(): UseChatState & UseChatActions {
           reactions: updatedReactions,
         });
       }
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || 'Failed to add reaction';
-      toast.error(errorMessage);
-      throw error;
+    } catch (error) {
+      console.error('Error adding reaction:', error);
     }
   }, [state.messages, user, addOrUpdateMessage]);
 
@@ -588,11 +501,11 @@ export function useChat(): UseChatState & UseChatActions {
     try {
       await messageApi.removeReaction(messageId, reaction);
       
-      // Update local message reactions
+      // Update local message
       const message = state.messages.get(messageId);
       if (message && user) {
-        const updatedReactions = message.reactions.filter(r => 
-          !(r.userId === user.id && r.reaction === reaction)
+        const updatedReactions = message.reactions.filter(
+          r => !(r.userId === user.id && r.reaction === reaction)
         );
         
         addOrUpdateMessage({
@@ -600,10 +513,8 @@ export function useChat(): UseChatState & UseChatActions {
           reactions: updatedReactions,
         });
       }
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || 'Failed to remove reaction';
-      toast.error(errorMessage);
-      throw error;
+    } catch (error) {
+      console.error('Error removing reaction:', error);
     }
   }, [state.messages, user, addOrUpdateMessage]);
 
@@ -611,137 +522,55 @@ export function useChat(): UseChatState & UseChatActions {
     const message = state.messages.get(messageId);
     if (!message || !user) return;
     
-    const hasReaction = message.reactions.some(r => r.userId === user.id && r.reaction === reaction);
+    const existingReaction = message.reactions.find(
+      r => r.userId === user.id && r.reaction === reaction
+    );
     
-    if (hasReaction) {
+    if (existingReaction) {
       await removeReaction(messageId, reaction);
     } else {
       await addReaction(messageId, reaction);
     }
   }, [state.messages, user, addReaction, removeReaction]);
 
-  // ========== File Upload ==========
-
-  const uploadFile = useCallback(async (file: File, onProgress?: (progress: number) => void): Promise<UploadResult> => {
-    try {
-      updateState({ isUploading: true });
-      
-      if (onProgress) {
-        onProgress(0);
-      }
-      
-      const result = await fileApi.upload(file);
-      
-      if (onProgress) {
-        onProgress(100);
-      }
-      
-      updateState({ isUploading: false });
-      return result;
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || 'File upload failed';
-      updateState({ isUploading: false });
-      toast.error(errorMessage);
-      throw error;
-    }
-  }, [updateState]);
-
-  // ========== Search and Media ==========
-
-  const searchMessages = useCallback(async (query: string): Promise<MessageWithUser[]> => {
-    if (!state.currentChatId || !query.trim()) return [];
-
-    try {
-      updateState({ isSearching: true });
-      
-      const messageResponses = await messageApi.search(state.currentChatId, query.trim());
-      const searchResults = messageResponses.map(convertMessageResponse);
-      
-      updateState({ searchResults, isSearching: false });
-      return searchResults;
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || 'Search failed';
-      updateState({ searchResults: [], isSearching: false });
-      console.error('Search error:', error);
-      return [];
-    }
-  }, [state.currentChatId, convertMessageResponse, updateState]);
-
-  const clearSearchResults = useCallback(() => {
-    updateState({ searchResults: [] });
-  }, [updateState]);
-
-  const getMediaMessages = useCallback(async (mediaType?: string): Promise<MessageWithUser[]> => {
-    if (!state.currentChatId) return [];
-
-    try {
-      const messageResponses = await messageApi.getMediaMessages(state.currentChatId, mediaType);
-      const mediaMessages = messageResponses.map(convertMessageResponse);
-      
-      // Cache media messages
-      setState(prev => {
-        const newMediaMessages = new Map(prev.mediaMessages);
-        newMediaMessages.set(mediaType || 'all', mediaMessages);
-        return { ...prev, mediaMessages: newMediaMessages };
-      });
-      
-      return mediaMessages;
-    } catch (error: any) {
-      console.error('Error loading media messages:', error);
-      return [];
-    }
-  }, [state.currentChatId, convertMessageResponse]);
-
   // ========== Typing Indicators ==========
 
-  const startTyping = useCallback(() => {
-    if (!state.currentChatId || !isConnected) return;
-
-    updateState({ isTyping: true });
+  const startTyping = useCallback((chatId: string) => {
+    if (!socket || !isConnected) return;
     
-    // Send typing indicator via WebSocket
-    sendSocketMessage({
-      type: 'typing_start',
-      payload: {
-        chatId: state.currentChatId,
-        userId: user?.id,
-        username: user?.username,
-        isTyping: true,
-      },
-    });
-
+    // If socket is Socket.IO client, use emit; if native WebSocket, use send
+    if (typeof (socket as any).emit === 'function') {
+      (socket as any).emit('typing_start', { chatId });
+    } else if (typeof (socket as any).send === 'function') {
+      (socket as any).send(JSON.stringify({ type: 'typing_start', chatId }));
+    }
+    
     // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
-
+    
     // Auto-stop typing after 3 seconds
     typingTimeoutRef.current = setTimeout(() => {
-      stopTyping();
+      stopTyping(chatId);
     }, 3000);
-  }, [state.currentChatId, isConnected, user, sendSocketMessage, updateState]);
+  }, [socket, isConnected]);
 
-  const stopTyping = useCallback(() => {
-    if (!state.currentChatId || !isConnected) return;
-
-    updateState({ isTyping: false });
+  const stopTyping = useCallback((chatId: string) => {
+    if (!socket || !isConnected) return;
     
-    // Send typing stop via WebSocket
-    sendSocketMessage({
-      type: 'typing_stop',
-      payload: {
-        chatId: state.currentChatId,
-        userId: user?.id,
-        username: user?.username,
-        isTyping: false,
-      },
-    });
-
-    // Clear timeout
+    // If socket is Socket.IO client, use emit; if native WebSocket, use send
+    if (typeof (socket as any).emit === 'function') {
+      (socket as any).emit('typing_stop', { chatId });
+    } else if (typeof (socket as any).send === 'function') {
+      (socket as any).send(JSON.stringify({ type: 'typing_stop', chatId }));
+    }
+    
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = undefined;
     }
-  }, [state.currentChatId, isConnected, user, sendSocketMessage, updateState]);
+  }, [socket, isConnected]);
 
   // ========== Utilities ==========
 
@@ -749,48 +578,54 @@ export function useChat(): UseChatState & UseChatActions {
     return state.messages.get(messageId) || null;
   }, [state.messages]);
 
-  const getLastMessage = useCallback((): MessageWithUser | null => {
-    if (state.messages.size === 0) return null;
+  const getLastMessage = useCallback((chatId: string): MessageWithUser | null => {
+    const chatMessages = Array.from(state.messages.values())
+      .filter(msg => msg.chatId === chatId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     
-    const messages = Array.from(state.messages.values());
-    return messages.sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )[0];
+    return chatMessages[0] || null;
+  }, [state.messages]);
+
+  const getUnreadCount = useCallback((chatId?: string): number => {
+    if (chatId) {
+      return Array.from(state.messages.values())
+        .filter(msg => msg.chatId === chatId && !msg.isOwn && msg.status !== 'read')
+        .length;
+    }
+    
+    return Array.from(state.messages.values())
+      .filter(msg => !msg.isOwn && msg.status !== 'read')
+      .length;
   }, [state.messages]);
 
   const clearError = useCallback(() => {
     updateState({ error: null });
   }, [updateState]);
 
-  const retryFailedMessage = useCallback(async (messageId: string): Promise<void> => {
-    const message = state.messages.get(messageId);
-    if (!message || message.status !== 'failed') return;
+  // ========== Search ==========
 
+  const searchMessages = useCallback(async (query: string): Promise<MessageWithUser[]> => {
+    if (!state.currentChatId || !query.trim()) return [];
+    
     try {
-      // Retry sending the message
-      const request: SendMessageRequest = {
-        chatId: message.chatId,
-        type: message.type,
-        content: message.content,
-        replyToId: message.replyToId,
-      };
-
-      const newMessage = await messageApi.sendMessage(request);
+      const messages = await messageApi.searchMessages(state.currentChatId, query, 50);
+      const messagesWithUser = messages.map(msg => ({
+        ...msg,
+        senderName: msg.senderId === user?.id ? (user?.username || user?.firstName || 'You') : 'Unknown',
+        isOwn: msg.senderId === user?.id,
+      }));
       
-      // Remove failed message and add new one
-      removeMessage(messageId);
-      addOrUpdateMessage({
-        ...newMessage,
-        senderName: user?.username || 'You',
-        isOwn: true,
-      });
-      
-      toast.success('Message sent successfully');
-    } catch (error: any) {
-      toast.error('Failed to retry message');
-      throw error;
+      updateState({ searchResults: messagesWithUser });
+      return messagesWithUser;
+    } catch (error) {
+      console.error('Error searching messages:', error);
+      return [];
     }
-  }, [state.messages, user, addOrUpdateMessage, removeMessage]);
+  }, [state.currentChatId, user, updateState]);
+
+  const clearSearchResults = useCallback(() => {
+    updateState({ searchResults: [] });
+  }, [updateState]);
 
   // ========== Cleanup ==========
 
@@ -837,22 +672,17 @@ export function useChat(): UseChatState & UseChatActions {
     removeReaction,
     toggleReaction,
     
-    // File Upload
-    uploadFile,
-    
-    // Search and Media
-    searchMessages,
-    clearSearchResults,
-    getMediaMessages,
-    
     // Typing Indicators
     startTyping,
     stopTyping,
+    
+    // Search
+    searchMessages,
+    clearSearchResults,
     
     // Utilities
     getMessageById,
     getLastMessage,
     clearError,
-    retryFailedMessage,
   };
 }

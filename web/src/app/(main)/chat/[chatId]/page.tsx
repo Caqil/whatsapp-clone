@@ -130,7 +130,7 @@ export default function ChatPage() {
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   );
 
-  const typingUserNames = Array.from(typingUsers);
+  const typingUserNames = Array.from(typingUsers.keys());
 
   // Loading state
   if (!currentChat && isLoadingMessages) {
@@ -197,8 +197,8 @@ export default function ChatPage() {
       <MessageInput
         onSendMessage={handleSendMessage}
         onSendMedia={handleSendMedia}
-        onStartTyping={startTyping}
-        onStopTyping={stopTyping}
+        onStartTyping={() => startTyping(chatId)}
+        onStopTyping={() => stopTyping(chatId)}
         disabled={!isConnected}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}

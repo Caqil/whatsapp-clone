@@ -1,6 +1,3 @@
-// src/types/user.ts
-
-// Main User entity (matches Go backend)
 export interface User {
   id: string;
   username: string;

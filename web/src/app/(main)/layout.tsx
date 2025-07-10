@@ -82,9 +82,27 @@ export default function MainLayout({
   const handleCreateDirectChat = async (userId: string) => {
     try {
       const chat = await createDirectChat(userId);
-      router.push(`/chat/${chat.id}`);
+
+      // Ensure chats is an array before using find
+      const chatsArray = Array.isArray(chats) ? chats : [];
+
+      // Find and select the new chat
+      const newChat = chatsArray.find(
+        (chat) =>
+          chat.type === "direct" &&
+          chat.participants.some((p) => p.id === userId)
+      );
+
+      if (newChat) {
+        router.push(`/chat/${newChat.id}`);
+      } else {
+        // Fallback to the returned chat ID
+        router.push(`/chat/${chat.id}`);
+      }
+
       toast.success("Chat created successfully");
     } catch (error) {
+      console.error("Failed to create direct chat:", error);
       toast.error("Failed to create chat");
     }
   };
@@ -99,103 +117,58 @@ export default function MainLayout({
       router.push(`/chat/${chat.id}`);
       toast.success(`Group "${name}" created successfully`);
     } catch (error) {
+      console.error("Failed to create group chat:", error);
       toast.error("Failed to create group chat");
     }
   };
 
-  const totalUnreadCount = chats.reduce(
-    (total, chat) => total + chat.unreadCount,
-    0
-  );
+  // Ensure user has required properties
+  const safeUser = user
+    ? {
+        ...user,
+        username: user.username || user.firstName || user.email || "User",
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+      }
+    : null;
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="min-h-screen bg-background">
       {/* Header */}
       <Header
-        user={user || undefined}
-        unreadCount={totalUnreadCount}
-        onToggleSidebar={() => {
-          if (isMobile) {
-            setShowMobileSidebar(!showMobileSidebar);
-          } else {
-            setIsSidebarCollapsed(!isSidebarCollapsed);
-          }
-        }}
-        onProfile={() => router.push("/profile")}
-        onSettings={() => router.push("/settings")}
+        user={safeUser}
         onLogout={handleLogout}
+        onToggleSidebar={() => setShowMobileSidebar(!showMobileSidebar)}
         isMobile={isMobile}
       />
 
-      {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar - Desktop */}
+      <div className="flex">
+        {/* Mobile Navigation */}
+        {isMobile && (
+          <MobileNav
+            chats={chats}
+            isOpen={showMobileSidebar}
+            onClose={() => setShowMobileSidebar(false)}
+            onCreateDirectChat={handleCreateDirectChat}
+            onCreateGroupChat={handleCreateGroupChat}
+          />
+        )}
+
+        {/* Desktop Sidebar */}
         {!isMobile && (
           <Sidebar
             chats={chats}
+            selectedChatId={null}
             isCollapsed={isSidebarCollapsed}
-            unreadCount={totalUnreadCount}
             onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             onCreateDirectChat={handleCreateDirectChat}
             onCreateGroupChat={handleCreateGroupChat}
           />
         )}
 
-        {/* Mobile Sidebar Overlay */}
-        {isMobile && showMobileSidebar && (
-          <>
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 bg-black/50 z-40"
-              onClick={() => setShowMobileSidebar(false)}
-            />
-
-            {/* Sidebar */}
-            <div className="fixed left-0 top-16 bottom-16 w-80 z-50 transform transition-transform">
-              <Sidebar
-                chats={chats}
-                unreadCount={totalUnreadCount}
-                onCreateDirectChat={(userId) => {
-                  handleCreateDirectChat(userId);
-                  setShowMobileSidebar(false);
-                }}
-                onCreateGroupChat={(name, userIds, description) => {
-                  handleCreateGroupChat(name, userIds, description);
-                  setShowMobileSidebar(false);
-                }}
-              />
-            </div>
-          </>
-        )}
-
-        {/* Main chat area */}
-        <div className="flex-1 flex flex-col">{children}</div>
+        {/* Main Content */}
+        <main className="flex-1 overflow-hidden">{children}</main>
       </div>
-
-      {/* Mobile Navigation */}
-      {isMobile && (
-        <MobileNav
-          unreadCount={totalUnreadCount}
-          onTabChange={(tab) => {
-            if (tab === "chats") {
-              setShowMobileSidebar(true);
-            } else {
-              router.push(`/${tab}`);
-            }
-          }}
-        />
-      )}
-
-      {/* Connection status */}
-      {!isConnected && (
-        <div className="fixed bottom-4 left-4 right-4 z-50">
-          <div className="bg-yellow-100 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg p-3 text-center">
-            <p className="text-sm text-yellow-800 dark:text-yellow-200">
-              Connecting to chat server...
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
