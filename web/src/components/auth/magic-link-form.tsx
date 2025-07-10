@@ -35,6 +35,7 @@ import type { MagicLinkRequest, DeviceType } from "@/types/auth";
 interface MagicLinkFormProps {
   onSuccess?: () => void;
   onSwitchToQR?: () => void;
+  
   className?: string;
   showBackButton?: boolean;
   defaultEmail?: string;
