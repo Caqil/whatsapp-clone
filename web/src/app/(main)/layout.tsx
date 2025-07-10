@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-media-query";
@@ -11,10 +11,8 @@ import {
   MessageSquare,
   Settings,
   Search,
-  MoreVertical,
   LogOut,
   User,
-  Bell,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -31,25 +29,51 @@ export default function MainLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated, isInitialized } = useAuth();
   const router = useRouter();
   const isMobile = useIsMobile();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
-  // Redirect if not authenticated
-  React.useEffect(() => {
-    if (!user) {
-      router.push("/login");
+  // Redirect to login if not authenticated (only after initialization)
+  useEffect(() => {
+    if (isInitialized && !isAuthenticated) {
+      router.replace("/login");
     }
-  }, [user, router]);
+  }, [isAuthenticated, isInitialized, router]);
 
-  if (!user) {
-    return null;
+  // Show loading while auth initializes
+  if (!isInitialized) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated
+  if (!isAuthenticated || !user) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
+          <p className="text-sm text-muted-foreground">
+            Redirecting to login...
+          </p>
+        </div>
+      </div>
+    );
   }
 
   const handleLogout = async () => {
-    await logout();
-    router.push("/login");
+    try {
+      await logout();
+      router.replace("/login");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
   };
 
   return (
@@ -92,14 +116,9 @@ export default function MainLayout({
                       {getInitials(`${user.firstName} ${user.lastName}`)}
                     </AvatarFallback>
                   </Avatar>
-                  {!isMobile && (
-                    <span className="text-sm font-medium">
-                      {user.firstName}
-                    </span>
-                  )}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => router.push("/profile")}>
                   <User className="mr-2 h-4 w-4" />
                   Profile
@@ -108,14 +127,10 @@ export default function MainLayout({
                   <Settings className="mr-2 h-4 w-4" />
                   Settings
                 </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Bell className="mr-2 h-4 w-4" />
-                  Notifications
-                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />
-                  Log out
+                  Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

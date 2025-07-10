@@ -1,4 +1,4 @@
-// src/lib/api.ts
+// src/lib/api.ts - Enhanced with better error handling
 import axios, { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type { 
   AuthResponse, 
@@ -25,14 +25,24 @@ import type { ApiResponse, UploadResult } from '@/types/api';
 import { getStoredTokens, removeStoredTokens, setStoredTokens } from './storage';
 import { API_ENDPOINTS } from '@/config/api-endpoints';
 
-// API Client Class
+// Enhanced API Client Class
 class ApiClient {
   private client: AxiosInstance;
   private refreshPromise: Promise<string> | null = null;
+  private isRefreshing = false;
 
   constructor() {
+    const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+    
+    // Debug logging
+    console.log('🔧 API Client initialized:', {
+      baseURL,
+      environment: process.env.NODE_ENV,
+      timestamp: new Date().toISOString()
+    });
+
     this.client = axios.create({
-      baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api',
+      baseURL,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -43,41 +53,96 @@ class ApiClient {
   }
 
   private setupInterceptors() {
-    // Request interceptor - Add auth token
+    // Request interceptor with enhanced logging
     this.client.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
         const { accessToken } = getStoredTokens();
+        
+        // Add auth token if available
         if (accessToken && config.headers) {
           config.headers.Authorization = `Bearer ${accessToken}`;
         }
+
+        // Enhanced logging
+        const fullUrl = `${config.baseURL}${config.url}`;
+        console.log(`📤 API Request: ${config.method?.toUpperCase()} ${fullUrl}`, {
+          params: config.params,
+          hasAuth: !!accessToken,
+          timestamp: new Date().toISOString()
+        });
+
         return config;
       },
-      (error) => Promise.reject(error)
+      (error) => {
+        console.error('❌ API Request Setup Error:', error);
+        return Promise.reject(error);
+      }
     );
 
-    // Response interceptor - Handle token refresh
+    // Response interceptor with enhanced error handling
     this.client.interceptors.response.use(
-      (response: AxiosResponse) => response,
+      (response: AxiosResponse) => {
+        // Log successful responses
+        console.log(`📥 API Response: ${response.status} ${response.config.url}`, {
+          success: response.data?.success,
+          hasData: !!response.data?.data,
+          timestamp: new Date().toISOString()
+        });
+        
+        return response;
+      },
       async (error: AxiosError) => {
-        const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+        const config = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+        
+        // Enhanced error logging
+        const errorDetails = {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          url: config?.url,
+          fullUrl: `${config?.baseURL}${config?.url}`,
+          method: config?.method?.toUpperCase(),
+          message: error.message,
+          responseData: error.response?.data,
+          timestamp: new Date().toISOString()
+        };
+        
+        console.error('❌ API Response Error:', errorDetails);
 
-        if (error.response?.status === 401 && !originalRequest._retry) {
-          originalRequest._retry = true;
+        // Handle different error types
+        if (error.response?.status === 404) {
+          console.error('🔍 404 Error Details:', {
+            requestedUrl: errorDetails.fullUrl,
+            availableEndpoints: this.getAvailableEndpoints(),
+            suggestion: 'Check if the backend server is running and the endpoint exists'
+          });
+        }
 
+        // Handle 401 errors with token refresh
+        if (error.response?.status === 401 && config && !config._retry && !this.isRefreshing) {
+          config._retry = true;
+          
           try {
-            const newToken = await this.refreshAccessToken();
-            if (newToken && originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${newToken}`;
-              return this.client(originalRequest);
+            const newToken = await this.handleTokenRefresh();
+            if (newToken && config.headers) {
+              config.headers.Authorization = `Bearer ${newToken}`;
+              console.log('🔄 Retrying request with new token');
+              return this.client(config);
             }
           } catch (refreshError) {
-            // Refresh failed, redirect to login
-            removeStoredTokens();
-            if (typeof window !== 'undefined') {
-              window.location.href = '/login';
-            }
+            console.error('❌ Token refresh failed:', refreshError);
+            this.handleAuthFailure();
             return Promise.reject(refreshError);
           }
+        }
+
+        // Handle 403 errors
+        if (error.response?.status === 403) {
+          console.error('🚫 403 Forbidden - Check user permissions');
+        }
+
+        // Handle 500 errors
+        if (error.response?.status === 500) {
+          console.error('🔥 500 Server Error - Backend issue');
         }
 
         return Promise.reject(error);
@@ -85,144 +150,212 @@ class ApiClient {
     );
   }
 
-  private async refreshAccessToken(): Promise<string> {
+  private getAvailableEndpoints(): string[] {
+    return [
+      '/health',
+      '/api/docs',
+      '/api/auth/login',
+      '/api/auth/register',
+      '/api/auth/magic-link',
+      '/api/users/profile',
+      '/api/chats',
+      '/api/messages'
+    ];
+  }
+
+  private async handleTokenRefresh(): Promise<string> {
     if (this.refreshPromise) {
       return this.refreshPromise;
     }
 
-    this.refreshPromise = this.performRefresh();
+    this.isRefreshing = true;
+    this.refreshPromise = this.performTokenRefresh();
+
     try {
-      const token = await this.refreshPromise;
-      if (!token) {
-        throw new Error('Failed to refresh access token');
-      }
-      return token;
+      const newToken = await this.refreshPromise;
+      return newToken;
     } finally {
+      this.isRefreshing = false;
       this.refreshPromise = null;
     }
   }
 
-  private async performRefresh(): Promise<string> {
+  private async performTokenRefresh(): Promise<string> {
     const { refreshToken } = getStoredTokens();
+    
     if (!refreshToken) {
       throw new Error('No refresh token available');
     }
 
     try {
-      const response = await axios.post<ApiResponse<AuthResponse>>(
-        `${this.client.defaults.baseURL}/auth/refresh`,
+      const response = await this.client.post<ApiResponse<AuthResponse>>(
+        API_ENDPOINTS.AUTH.REFRESH,
         { refreshToken }
       );
 
       if (response.data.success && response.data.data) {
         const { accessToken, refreshToken: newRefreshToken } = response.data.data;
         setStoredTokens(accessToken, newRefreshToken);
-        if (!accessToken) {
-          throw new Error('No access token returned from refresh');
-        }
         return accessToken;
       }
 
       throw new Error('Token refresh failed');
     } catch (error) {
-      removeStoredTokens();
+      console.error('❌ Token refresh error:', error);
       throw error;
     }
   }
 
-  // Generic API methods
-  private async get<T>(url: string, params?: Record<string, any>): Promise<T> {
-    const response = await this.client.get<ApiResponse<T>>(url, { params });
-    if (!response.data.success) {
-      throw new Error(response.data.error || response.data.message);
+  private handleAuthFailure(): void {
+    console.log('🔓 Authentication failed - clearing tokens');
+    removeStoredTokens();
+    
+    // Only redirect if we're in the browser
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
     }
-    return response.data.data!;
   }
 
-private async post<T>(url: string, data?: any): Promise<T> {
+  // Enhanced generic API methods with better error handling
+  private async get<T>(url: string, params?: Record<string, any>): Promise<T> {
+    try {
+      const response = await this.client.get<ApiResponse<T>>(url, { params });
+      
+      // Handle different response formats
+      if (response.data && typeof response.data === 'object') {
+        // Standard API response format
+        if ('success' in response.data) {
+          if (!response.data.success) {
+            throw new Error(response.data.error || response.data.message || 'API request failed');
+          }
+          return response.data.data!;
+        }
+        
+        // Direct data response (for health checks, etc.)
+        return response.data as T;
+      }
+      
+      // Fallback for other response types
+      return response.data as T;
+      
+    } catch (error) {
+      console.error(`❌ GET ${url} failed:`, error);
+      this.handleApiError(error, 'GET', url);
+      throw error;
+    }
+  }
+
+  private async post<T>(url: string, data?: any): Promise<T> {
     try {
       const response = await this.client.post<ApiResponse<T>>(url, data);
       
-      // Handle successful responses
-      if (response.data.success) {
-        return response.data.data!;
-      }
-      
-      // Handle unsuccessful responses that still have status 200
-      throw new Error(response.data.error || response.data.message || 'Request failed');
-      
-    } catch (error: any) {
-      // Handle axios errors
-      if (error.response) {
-        // Server responded with error status
-        const errorData = error.response.data;
-        
-        // For magic link specific errors, preserve the full error structure
-        if (error.response.status === 412 && errorData?.data?.requiresRegistration) {
-          // Preserve the full error for registration flow
-          const customError = new Error(errorData.message || 'user registration required');
-          (customError as any).response = error.response;
-          throw customError;
+      // Handle different response formats
+      if (response.data && typeof response.data === 'object') {
+        // Standard API response format
+        if ('success' in response.data) {
+          if (!response.data.success) {
+            // Handle specific error cases
+            if (response.status === 412 && response.data.data) {
+              // Magic link registration required
+              const customError = new Error(response.data.message || 'Registration required');
+              (customError as any).response = response;
+              throw customError;
+            }
+            
+            throw new Error(response.data.error || response.data.message || 'API request failed');
+          }
+          return response.data.data!;
         }
         
-        // For other errors, extract the message
-        const errorMessage = errorData?.message || errorData?.error || 'Request failed';
-        throw new Error(errorMessage);
+        // Direct data response
+        return response.data as T;
       }
       
-      // Network or other errors
-      throw error;
-    }
-  }
-
-  // FIXED: Magic Link verification with better error handling
-  async verifyMagicLink(request: VerifyMagicLinkRequest): Promise<AuthResponse> {
-    try {
-      return await this.post<AuthResponse>(API_ENDPOINTS.AUTH.VERIFY, request);
-    } catch (error: any) {
-      // Re-throw the error to preserve the response structure for registration flow
-      throw error;
-    }
-  }
-
-  // ADDED: Debug method to check magic link details
-  async getMagicLinkDetails(token: string): Promise<any> {
-    try {
-      return await this.get<any>(`${API_ENDPOINTS.AUTH.VERIFY}?token=${token}`);
+      return response.data as T;
+      
     } catch (error) {
-      console.error('Failed to get magic link details:', error);
+      console.error(`❌ POST ${url} failed:`, error);
+      this.handleApiError(error, 'POST', url);
       throw error;
     }
   }
 
   private async put<T>(url: string, data?: any): Promise<T> {
-    const response = await this.client.put<ApiResponse<T>>(url, data);
-    if (!response.data.success) {
-      throw new Error(response.data.error || response.data.message);
+    try {
+      const response = await this.client.put<ApiResponse<T>>(url, data);
+      
+      if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+        if (!response.data.success) {
+          throw new Error(response.data.error || response.data.message || 'API request failed');
+        }
+        return response.data.data!;
+      }
+      
+      return response.data as T;
+      
+    } catch (error) {
+      console.error(`❌ PUT ${url} failed:`, error);
+      this.handleApiError(error, 'PUT', url);
+      throw error;
     }
-    return response.data.data!;
   }
 
   private async delete<T>(url: string): Promise<T> {
-    const response = await this.client.delete<ApiResponse<T>>(url);
-    if (!response.data.success) {
-      throw new Error(response.data.error || response.data.message);
+    try {
+      const response = await this.client.delete<ApiResponse<T>>(url);
+      
+      if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+        if (!response.data.success) {
+          throw new Error(response.data.error || response.data.message || 'API request failed');
+        }
+        return response.data.data!;
+      }
+      
+      return response.data as T;
+      
+    } catch (error) {
+      console.error(`❌ DELETE ${url} failed:`, error);
+      this.handleApiError(error, 'DELETE', url);
+      throw error;
     }
-    return response.data.data!;
+  }
+
+  private handleApiError(error: any, method: string, url: string): void {
+    if (error.response?.status === 404) {
+      console.error(`🔍 ${method} ${url} - Endpoint not found. Available endpoints:`, this.getAvailableEndpoints());
+      
+      // Show user-friendly error message
+      if (typeof window !== 'undefined') {
+        console.error('💡 Suggestion: Check if your backend server is running on the correct port');
+      }
+    }
+  }
+
+  // ========== Health Check ==========
+  async healthCheck(): Promise<{ status: string; version: string; features: string[] }> {
+    try {
+      // Try the health endpoint without /api prefix first
+      const response = await this.client.get('/health');
+      return response.data;
+    } catch (error) {
+      console.error('❌ Health check failed:', error);
+      throw error;
+    }
   }
 
   // ========== Authentication API ==========
-
-  // Magic Link Authentication
   async sendMagicLink(request: MagicLinkRequest): Promise<MagicLinkResponse> {
     return this.post<MagicLinkResponse>(API_ENDPOINTS.AUTH.MAGIC_LINK, request);
   }
 
-  async registerWithMagicLink(token: string, request: MagicLinkUserRequest): Promise<AuthResponse> {
-    return this.post<AuthResponse>(`${API_ENDPOINTS.AUTH.REGISTER_MAGIC}?token=${token}`, request);
+  async verifyMagicLink(request: VerifyMagicLinkRequest): Promise<AuthResponse> {
+    return this.post<AuthResponse>(API_ENDPOINTS.AUTH.VERIFY, request);
   }
 
-  // QR Code Authentication
+  async registerWithMagicLink(token: string, request: MagicLinkUserRequest): Promise<AuthResponse> {
+    return this.post<AuthResponse>(`${API_ENDPOINTS.AUTH.REGISTER_MAGIC}?token=${encodeURIComponent(token)}`, request);
+  }
+
   async generateQRCode(request: QRCodeRequest): Promise<QRCodeResponse> {
     return this.post<QRCodeResponse>(API_ENDPOINTS.AUTH.QR.GENERATE, request);
   }
@@ -232,14 +365,13 @@ private async post<T>(url: string, data?: any): Promise<T> {
   }
 
   async checkQRStatus(secret: string): Promise<QRStatusResponse> {
-    return this.get<QRStatusResponse>(`${API_ENDPOINTS.AUTH.QR.STATUS}?secret=${secret}`);
+    return this.get<QRStatusResponse>(`${API_ENDPOINTS.AUTH.QR.STATUS}?secret=${encodeURIComponent(secret)}`);
   }
 
   async loginWithQRCode(secret: string): Promise<AuthResponse> {
-    return this.post<AuthResponse>(`${API_ENDPOINTS.AUTH.QR.LOGIN}?secret=${secret}`);
+    return this.post<AuthResponse>(API_ENDPOINTS.AUTH.QR.LOGIN, { secret });
   }
 
-  // Session Management
   async refreshToken(request: RefreshTokenRequest): Promise<AuthResponse> {
     return this.post<AuthResponse>(API_ENDPOINTS.AUTH.REFRESH, request);
   }
@@ -253,7 +385,6 @@ private async post<T>(url: string, data?: any): Promise<T> {
   }
 
   // ========== User API ==========
-
   async getUserProfile(): Promise<User> {
     return this.get<User>(API_ENDPOINTS.USERS.PROFILE);
   }
@@ -267,7 +398,6 @@ private async post<T>(url: string, data?: any): Promise<T> {
   }
 
   // ========== Chat API ==========
-
   async createChat(request: CreateChatRequest): Promise<Chat> {
     return this.post<Chat>(API_ENDPOINTS.CHATS.BASE, request);
   }
@@ -281,7 +411,6 @@ private async post<T>(url: string, data?: any): Promise<T> {
   }
 
   // ========== Message API ==========
-
   async sendMessage(request: SendMessageRequest): Promise<Message> {
     return this.post<Message>(API_ENDPOINTS.MESSAGES.BASE, request);
   }
@@ -310,43 +439,7 @@ private async post<T>(url: string, data?: any): Promise<T> {
     );
   }
 
-  // Message Reactions
-  async addReaction(request: MessageReactionRequest): Promise<void> {
-    return this.post<void>(API_ENDPOINTS.MESSAGES.REACTIONS, request);
-  }
-
-  async removeReaction(messageId: string): Promise<void> {
-    return this.delete<void>(`${API_ENDPOINTS.MESSAGES.BASE}/${messageId}/reactions`);
-  }
-
-  // Message Management
-  async forwardMessages(request: ForwardMessageRequest): Promise<void> {
-    return this.post<void>(API_ENDPOINTS.MESSAGES.FORWARD, request);
-  }
-
-  async deleteMessage(request: DeleteMessageRequest): Promise<void> {
-    return this.post<void>(`${API_ENDPOINTS.MESSAGES.DELETE}`, request);
-  }
-
-  async editMessage(messageId: string, content: string): Promise<void> {
-    return this.put<void>(`${API_ENDPOINTS.MESSAGES.BASE}/${messageId}/edit`, { content });
-  }
-
-  // Search and Media
-  async searchMessages(chatId: string, query: string, limit = 20): Promise<MessageResponse[]> {
-    return this.get<MessageResponse[]>(
-      `${API_ENDPOINTS.MESSAGES.CHAT}/${chatId}/search?q=${encodeURIComponent(query)}&limit=${limit}`
-    );
-  }
-
-  async getMediaMessages(chatId: string, type: string, limit = 20, offset = 0): Promise<MessageResponse[]> {
-    return this.get<MessageResponse[]>(
-      `${API_ENDPOINTS.MESSAGES.CHAT}/${chatId}/media?type=${type}&limit=${limit}&offset=${offset}`
-    );
-  }
-
   // ========== File Upload API ==========
-
   async uploadFile(file: File): Promise<UploadResult> {
     const formData = new FormData();
     formData.append('file', file);
@@ -361,45 +454,17 @@ private async post<T>(url: string, data?: any): Promise<T> {
       }
     );
 
-    if (!response.data.success) {
-      throw new Error(response.data.error || response.data.message);
-    }
-
-    return response.data.data!;
-  }
-
-  async sendMediaMessage(file: File, chatId: string, content = ''): Promise<Message> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('chatId', chatId);
-    formData.append('content', content);
-
-    const response = await this.client.post<ApiResponse<Message>>(
-      API_ENDPOINTS.MESSAGES.MEDIA,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+    if (response.data && 'success' in response.data) {
+      if (!response.data.success) {
+        throw new Error(response.data.error || response.data.message || 'Upload failed');
       }
-    );
-
-    if (!response.data.success) {
-      throw new Error(response.data.error || response.data.message);
+      return response.data.data!;
     }
 
-    return response.data.data!;
-  }
-
-  // ========== Health Check ==========
-
-  async healthCheck(): Promise<{ status: string; version: string; features: string[] }> {
-    const response = await this.client.get('/health');
-    return response.data;
+    return response.data as UploadResult;
   }
 
   // ========== Utility Methods ==========
-
   setAuthToken(token: string): void {
     this.client.defaults.headers.common['Authorization'] = `Bearer ${token}`;
   }
@@ -412,7 +477,6 @@ private async post<T>(url: string, data?: any): Promise<T> {
     return this.client.defaults.baseURL || '';
   }
 
-  // For direct access to axios instance if needed
   getClient(): AxiosInstance {
     return this.client;
   }
@@ -456,22 +520,10 @@ export const messageApi = {
   markAsRead: (messageId: string) => apiClient.markAsRead(messageId),
   markMultipleAsRead: (messageIds: string[]) => apiClient.markMultipleAsRead(messageIds),
   getUnreadCount: (chatId: string) => apiClient.getUnreadCount(chatId),
-  addReaction: (request: MessageReactionRequest) => apiClient.addReaction(request),
-  removeReaction: (messageId: string) => apiClient.removeReaction(messageId),
-  forward: (request: ForwardMessageRequest) => apiClient.forwardMessages(request),
-  delete: (request: DeleteMessageRequest) => apiClient.deleteMessage(request),
-  edit: (messageId: string, content: string) => apiClient.editMessage(messageId, content),
-  search: (chatId: string, query: string, limit?: number) => 
-    apiClient.searchMessages(chatId, query, limit),
-  getMedia: (chatId: string, type: string, limit?: number, offset?: number) => 
-    apiClient.getMediaMessages(chatId, type, limit, offset),
 };
 
 export const fileApi = {
   upload: (file: File) => apiClient.uploadFile(file),
-  sendMedia: (file: File, chatId: string, content?: string) => 
-    apiClient.sendMediaMessage(file, chatId, content),
 };
 
-// Export the main client as default
 export default apiClient;

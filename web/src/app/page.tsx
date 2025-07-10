@@ -1,46 +1,38 @@
-// src/app/page.tsx
 "use client";
 
-import { useEffect, useRef } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 
 export default function RootPage() {
   const router = useRouter();
-  const pathname = usePathname();
-  const { user, isLoading, isAuthenticated, isInitialized } = useAuth();
-  const hasRedirected = useRef(false);
+  const { isAuthenticated, isLoading, isInitialized } = useAuth();
 
   useEffect(() => {
-    // Prevent multiple redirects
-    if (hasRedirected.current || !isInitialized || pathname !== "/") {
+    // Wait for auth to initialize before making any decisions
+    if (!isInitialized) {
       return;
     }
 
-    // Only redirect from the root path
-    if (isAuthenticated && user) {
-      console.log("User authenticated, redirecting to chat");
-      hasRedirected.current = true;
+    // Only redirect once when auth state is determined
+    if (isAuthenticated) {
+      // User is logged in, go to main chat page
       router.replace("/chat");
-    } else if (!isLoading && !isAuthenticated) {
-      console.log("User not authenticated, redirecting to login");
-      hasRedirected.current = true;
+    } else {
+      // User is not logged in, go to login
       router.replace("/login");
     }
-  }, [user, isLoading, isAuthenticated, isInitialized, router, pathname]);
+  }, [isInitialized, isAuthenticated, router]);
 
-  // Don't render anything if we're not on the root path
-  if (pathname !== "/") {
-    return null;
-  }
-
-  // Show loading while checking auth status or redirecting
+  // Always show loading on root page
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="text-center">
         <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-        <p className="text-muted-foreground">Loading...</p>
+        <p className="text-muted-foreground">
+          {!isInitialized ? "Initializing..." : "Redirecting..."}
+        </p>
       </div>
     </div>
   );

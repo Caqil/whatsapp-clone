@@ -5,7 +5,13 @@ import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Mail, Loader2, Smartphone, Monitor, AlertCircle } from "lucide-react";
+import {
+  Mail,
+  Loader2,
+  CheckCircle,
+  AlertCircle,
+  RefreshCw,
+} from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,10 +24,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { magicLinkRequestSchema } from "@/lib/validation";
-import type { MagicLinkRequest, DeviceType } from "@/types/auth";
+
+const magicLinkRequestSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
+  deviceType: z.enum(["web", "mobile", "desktop"]),
+  deviceName: z.string(),
+});
 
 interface MagicLinkFormProps {
   onSuccess?: (email: string) => void;
@@ -31,6 +40,7 @@ interface MagicLinkFormProps {
 }
 
 type FormData = z.infer<typeof magicLinkRequestSchema>;
+type FormState = "idle" | "sending" | "sent" | "error";
 
 export function MagicLinkForm({
   onSuccess,
@@ -39,7 +49,9 @@ export function MagicLinkForm({
   defaultEmail,
 }: MagicLinkFormProps) {
   const { sendMagicLink, isLoading, error } = useAuth();
-  const [deviceType, setDeviceType] = useState<DeviceType>("web");
+  const [formState, setFormState] = useState<FormState>("idle");
+  const [sentEmail, setSentEmail] = useState<string>("");
+  const [countdown, setCountdown] = useState<number>(0);
 
   const form = useForm<FormData>({
     resolver: zodResolver(magicLinkRequestSchema),
@@ -53,31 +65,57 @@ export function MagicLinkForm({
   // Detect device type
   useEffect(() => {
     const userAgent = navigator.userAgent.toLowerCase();
-    let detectedType: DeviceType = "web";
     let deviceName = "Web Browser";
 
     if (/mobile|android|iphone|ipad|phone|tablet/.test(userAgent)) {
-      detectedType = "mobile";
       deviceName = "Mobile Device";
+      form.setValue("deviceType", "mobile");
     } else if (/electron/.test(userAgent)) {
-      detectedType = "desktop";
       deviceName = "Desktop App";
+      form.setValue("deviceType", "desktop");
     }
 
-    setDeviceType(detectedType);
-    form.setValue("deviceType", detectedType);
     form.setValue("deviceName", deviceName);
   }, [form]);
 
+  // Countdown timer for resend
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
+
   const onSubmit = async (data: FormData) => {
     try {
+      setFormState("sending");
+      console.log("🔄 Sending magic link to:", data.email);
+
       const response = await sendMagicLink(data);
-      console.log("Magic link sent successfully:", response);
+
+      console.log("✅ Magic link sent successfully:", response);
+      setFormState("sent");
+      setSentEmail(data.email);
+      setCountdown(60); // 60 second cooldown
+
       onSuccess?.(data.email);
     } catch (error) {
-      console.error("Failed to send magic link:", error);
-      // Error is handled by the useAuth hook
+      console.error("❌ Failed to send magic link:", error);
+      setFormState("error");
     }
+  };
+
+  const handleResend = () => {
+    if (countdown > 0) return;
+
+    setFormState("idle");
+    form.handleSubmit(onSubmit)();
+  };
+
+  const handleChangeEmail = () => {
+    setFormState("idle");
+    setSentEmail("");
+    setCountdown(0);
   };
 
   return (
@@ -85,120 +123,173 @@ export function MagicLinkForm({
       <Card>
         <CardHeader className="text-center">
           <div className="mx-auto w-12 h-12 bg-blue-100 dark:bg-blue-900/20 rounded-full flex items-center justify-center mb-4">
-            <Mail className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            {formState === "sending" ? (
+              <Loader2 className="h-6 w-6 text-blue-600 dark:text-blue-400 animate-spin" />
+            ) : formState === "sent" ? (
+              <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
+            ) : formState === "error" ? (
+              <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
+            ) : (
+              <Mail className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            )}
           </div>
-          <CardTitle>Sign in with Magic Link</CardTitle>
-          <CardDescription>
-            We'll send a secure link to your email. No password required!
-          </CardDescription>
 
-          <div className="flex justify-center">
-            <Badge variant="secondary" className="flex items-center gap-2">
-              {deviceType === "web" ? (
-                <Monitor className="h-3 w-3" />
-              ) : deviceType === "mobile" ? (
-                <Smartphone className="h-3 w-3" />
-              ) : (
-                <Monitor className="h-3 w-3" />
-              )}
-              {deviceType === "web"
-                ? "Web Browser"
-                : deviceType === "mobile"
-                ? "Mobile Device"
-                : "Desktop App"}
-            </Badge>
-          </div>
+          <CardTitle>
+            {formState === "sent"
+              ? "Check Your Email"
+              : "Sign in with Magic Link"}
+          </CardTitle>
+
+          <CardDescription>
+            {formState === "sent"
+              ? `We've sent a secure login link to ${sentEmail}`
+              : "Well send a secure link to your email. No password required!"}
+          </CardDescription>
         </CardHeader>
 
-        <CardContent>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="Enter your email"
-                {...form.register("email")}
-                className={cn(
-                  form.formState.errors.email && "border-destructive"
-                )}
-                disabled={isLoading}
-                autoFocus
-                autoComplete="email"
-              />
-              {form.formState.errors.email && (
-                <p className="text-sm text-destructive">
-                  {form.formState.errors.email.message}
-                </p>
-              )}
-            </div>
-
-            {/* Hidden device fields */}
-            <input type="hidden" {...form.register("deviceType")} />
-            <input type="hidden" {...form.register("deviceName")} />
-
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
+        <CardContent className="space-y-4">
+          {formState === "sent" ? (
+            // Success state
+            <div className="space-y-4">
+              <Alert>
+                <Mail className="h-4 w-4" />
                 <AlertDescription>
-                  {typeof error === "string"
-                    ? error
-                    : error?.message ?? String(error)}
+                  <strong>Check your email!</strong> We've sent a magic link to{" "}
+                  <strong>{sentEmail}</strong>. Click the link to sign in
+                  instantly.
                 </AlertDescription>
               </Alert>
-            )}
 
-            <Button
-              type="submit"
-              disabled={isLoading || !form.formState.isValid}
-              className="w-full"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Sending magic link...
-                </>
-              ) : (
-                <>
-                  <Mail className="mr-2 h-4 w-4" />
-                  Send magic link
-                </>
+              <div className="space-y-3">
+                <div className="text-sm text-muted-foreground text-center">
+                  <div className="space-y-1">
+                    <p>• Check your inbox (and spam folder)</p>
+                    <p>• Click the "Sign In Securely" button</p>
+                    <p>• The link expires in 15 minutes</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleResend}
+                    variant="outline"
+                    disabled={countdown > 0}
+                    className="flex-1"
+                  >
+                    {countdown > 0 ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Resend in {countdown}s
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Resend Link
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    onClick={handleChangeEmail}
+                    variant="ghost"
+                    className="flex-1"
+                  >
+                    Change Email
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            // Form state
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email Address</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="Enter your email address"
+                  {...form.register("email")}
+                  disabled={formState === "sending"}
+                  className={cn(
+                    form.formState.errors.email && "border-destructive"
+                  )}
+                />
+                {form.formState.errors.email && (
+                  <p className="text-sm text-destructive">
+                    {form.formState.errors.email.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Show error if any */}
+              {formState === "error" && error && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    {error.message ||
+                      "Failed to send magic link. Please try again."}
+                  </AlertDescription>
+                </Alert>
               )}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
 
-      {/* Alternative login methods */}
-      {onSwitchToQR && (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Or sign in with your mobile device
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={formState === "sending" || isLoading}
+                size="lg"
+              >
+                {formState === "sending" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Sending Magic Link...
+                  </>
+                ) : (
+                  <>
+                    <Mail className="h-4 w-4 mr-2" />
+                    Send Magic Link
+                  </>
+                )}
+              </Button>
+            </form>
+          )}
+
+          {/* Additional info */}
+          <div className="text-center">
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>🔐 Secure • 🚀 Fast • 🔑 No passwords</p>
+              <p>The link will expire in 15 minutes for security</p>
+            </div>
+          </div>
+
+          {/* Switch to QR code option */}
+          {onSwitchToQR && formState !== "sent" && (
+            <div className="text-center pt-4 border-t">
+              <p className="text-sm text-muted-foreground mb-2">
+                Prefer to scan a QR code?
               </p>
               <Button
                 variant="outline"
                 onClick={onSwitchToQR}
-                className="w-full"
+                size="sm"
+                disabled={formState === "sending"}
               >
-                <Smartphone className="mr-2 h-4 w-4" />
-                Use QR Code
+                Use QR Code Instead
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
-      {/* Help text */}
-      <div className="text-center space-y-2">
-        <p className="text-xs text-muted-foreground">
-          Don't have an account? The magic link will help you create one.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Magic links expire after 15 minutes for security.
-        </p>
-      </div>
+      {/* Development debug info */}
+      {process.env.NODE_ENV === "development" && formState === "sent" && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Development Mode:</strong> Check your server console for the
+            magic link if email delivery is not configured.
+          </AlertDescription>
+        </Alert>
+      )}
     </div>
   );
 }

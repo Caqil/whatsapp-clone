@@ -222,6 +222,8 @@ export const WEBSOCKET_CONFIG = {
   HEARTBEAT_INTERVAL: 30000, // 30 seconds
   CONNECTION_TIMEOUT: 10000, // 10 seconds
   MESSAGE_TIMEOUT: 5000, // 5 seconds
+  RECONNECT_DELAY: 1000, // Add a default reconnect delay (e.g., 1000ms)
+  MAX_RECONNECT_DELAY: 30000, // Add a max reconnect delay (e.g., 30000ms)
 } as const;
 
 export const WEBSOCKET_EVENTS = {

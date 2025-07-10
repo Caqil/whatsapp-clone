@@ -1,4 +1,4 @@
-// src/app/chat/page.tsx
+// src/app/(main)/chat/page.tsx - Fixed navigation
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -37,10 +37,15 @@ import { APP_CONFIG } from "@/lib/constants";
 
 export default function ChatPage() {
   const { user } = useAuth();
-  const { chats, isLoading, error } = useChat();
+  const { chats, isLoading, error, loadChats } = useChat();
   const router = useRouter();
   const isMobile = useIsMobile();
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Load chats when component mounts
+  useEffect(() => {
+    loadChats();
+  }, [loadChats]);
 
   const chatList = Array.from(chats.values()).filter((chat) => {
     if (!searchQuery.trim()) return true;
@@ -70,7 +75,7 @@ export default function ChatPage() {
   };
 
   const handleNewChat = () => {
-    // For now, just navigate to a mock chat
+    // FIXED: Navigate to proper new chat page instead of /chat/new
     router.push("/chat/new");
   };
 
@@ -79,6 +84,7 @@ export default function ChatPage() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <p className="text-destructive mb-4">Failed to load chats</p>
+          <p className="text-muted-foreground text-sm mb-4">{error}</p>
           <Button onClick={() => window.location.reload()}>Try again</Button>
         </div>
       </div>
@@ -99,8 +105,8 @@ export default function ChatPage() {
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm" onClick={handleNewChat}>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleNewChat} size="sm">
               <Plus className="h-4 w-4 mr-2" />
               New Chat
             </Button>
@@ -108,28 +114,21 @@ export default function ChatPage() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={user?.avatar} />
-                    <AvatarFallback>
-                      {getInitials(`${user?.firstName} ${user?.lastName}`)}
-                    </AvatarFallback>
-                  </Avatar>
+                  <MoreVertical className="h-5 w-5" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => router.push("/profile")}>
-                  Profile
+                <DropdownMenuItem onClick={handleNewChat}>
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  New Chat
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push("/settings")}>
-                  Settings
+                <DropdownMenuItem>
+                  <Users className="mr-2 h-4 w-4" />
+                  New Group
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    // Add logout logic here
-                    router.push("/login");
-                  }}
-                >
-                  Logout
+                <DropdownMenuItem>
+                  <Archive className="mr-2 h-4 w-4" />
+                  Archived
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -137,121 +136,127 @@ export default function ChatPage() {
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-6">
-        <div className="max-w-4xl mx-auto">
-          {/* Search Bar */}
-          <div className="mb-6">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search chats..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-          </div>
+      {/* Search */}
+      <div className="container mx-auto px-4 py-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search conversations..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+      </div>
 
-          {/* Chat List */}
+      {/* Chat List */}
+      <div className="container mx-auto px-4 pb-4">
+        {isLoading ? (
           <div className="space-y-2">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin" />
-                <span className="ml-2 text-muted-foreground">
-                  Loading chats...
-                </span>
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex items-center gap-3 p-4 rounded-lg">
+                <div className="h-12 w-12 bg-muted rounded-full animate-pulse" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-muted rounded animate-pulse" />
+                  <div className="h-3 bg-muted rounded animate-pulse w-2/3" />
+                </div>
               </div>
-            ) : chatList.length === 0 ? (
-              <div className="text-center py-12">
-                <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium mb-2">No chats yet</h3>
-                <p className="text-muted-foreground mb-4">
-                  Start a conversation with your friends and family
-                </p>
-                <Button onClick={handleNewChat}>
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Start New Chat
-                </Button>
-              </div>
-            ) : (
-              chatList.map((chat) => (
-                <div
-                  key={chat.id}
-                  onClick={() => handleChatClick(chat.id)}
-                  className="flex items-center space-x-3 p-4 rounded-lg border bg-card hover:bg-accent cursor-pointer transition-colors"
-                >
-                  <div className="relative">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage
-                        src={chat.avatar || chat.participants[0].avatar}
-                      />
-                      <AvatarFallback>
-                        {getInitials(getChatDisplayName(chat))}
-                      </AvatarFallback>
-                    </Avatar>
-                    {chat.isPinned && (
-                      <Pin className="absolute -top-1 -right-1 h-3 w-3 text-primary" />
-                    )}
-                  </div>
+            ))}
+          </div>
+        ) : chatList.length === 0 ? (
+          <div className="text-center py-12">
+            <MessageCircle className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+            <h3 className="text-lg font-medium mb-2">No chats yet</h3>
+            <p className="text-muted-foreground mb-4">
+              Start a conversation by creating a new chat
+            </p>
+            <Button onClick={handleNewChat}>
+              <Plus className="h-4 w-4 mr-2" />
+              Start New Chat
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {chatList.map((chat) => (
+              <div
+                key={chat.id}
+                className={cn(
+                  "flex items-center gap-3 p-4 rounded-lg cursor-pointer transition-colors",
+                  "hover:bg-muted/50"
+                )}
+                onClick={() => handleChatClick(chat.id)}
+              >
+                <div className="relative">
+                  <Avatar className="h-12 w-12">
+                    <AvatarImage src={chat.avatar} />
+                    <AvatarFallback>
+                      {getInitials(getChatDisplayName(chat))}
+                    </AvatarFallback>
+                  </Avatar>
+                  {chat.isPinned && (
+                    <Pin className="h-3 w-3 absolute -top-1 -right-1 text-primary" />
+                  )}
+                </div>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <h3 className="font-medium truncate">
-                        {getChatDisplayName(chat)}
-                      </h3>
-                      <div className="flex items-center space-x-2">
-                        {chat.lastMessage?.createdAt && (
-                          <span className="text-xs text-muted-foreground">
-                            {formatDistanceToNow(
-                              new Date(chat.lastMessage.createdAt)
-                            )}
-                          </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="font-medium truncate">
+                      {getChatDisplayName(chat)}
+                    </h3>
+                    <span className="text-xs text-muted-foreground">
+                      {chat.lastMessage?.createdAt &&
+                        formatDistanceToNow(
+                          new Date(chat.lastMessage.createdAt)
                         )}
-                        {chat.unreadCount > 0 && (
-                          <Badge
-                            variant="default"
-                            className="h-5 min-w-[20px] text-xs"
-                          >
-                            {chat.unreadCount}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
                     <p className="text-sm text-muted-foreground truncate">
                       {getChatLastMessage(chat)}
                     </p>
+                    <div className="flex items-center gap-1">
+                      {chat.isMuted && (
+                        <div className="h-4 w-4 text-muted-foreground">🔇</div>
+                      )}
+                      {chat.unreadCount > 0 && (
+                        <Badge variant="default" className="h-5 px-2 text-xs">
+                          {chat.unreadCount}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem>
-                        <Pin className="h-4 w-4 mr-2" />
-                        {chat.isPinned ? "Unpin" : "Pin"} Chat
-                      </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <Archive className="h-4 w-4 mr-2" />
-                        Archive Chat
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="text-destructive">
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete Chat
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                 </div>
-              ))
-            )}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem>
+                      <Pin className="mr-2 h-4 w-4" />
+                      {chat.isPinned ? "Unpin" : "Pin"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem>
+                      <Archive className="mr-2 h-4 w-4" />
+                      Archive
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive">
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ))}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

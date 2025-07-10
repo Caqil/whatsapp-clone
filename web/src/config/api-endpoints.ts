@@ -97,9 +97,10 @@ export function buildApiUrl(endpoint: string, baseUrl?: string): string {
  * Build WebSocket URL
  */
 export function buildWebSocketUrl(token?: string, baseUrl?: string): string {
-  // FIXED: Use HTTP base URL and let socket.io handle the protocol upgrade
+  // Use WebSocket protocol directly for native WebSocket connection
   const base = baseUrl || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-  const wsUrl = `${base}${API_ENDPOINTS.WEBSOCKET}`;
+  const wsBase = base.replace('http://', 'ws://').replace('https://', 'wss://');
+  const wsUrl = `${wsBase}/api/ws`; // Your backend endpoint
   
   if (token) {
     return `${wsUrl}?token=${encodeURIComponent(token)}`;
