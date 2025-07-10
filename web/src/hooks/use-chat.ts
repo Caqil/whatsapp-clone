@@ -180,44 +180,41 @@ export function useChat(): UseChatReturn {
   }, []);
 
   // Convert Chat (backend format) to ChatWithUsers (frontend format)
-  const convertChatToClientFormat = useCallback(async (chat: Chat): Promise<ChatWithUsers> => {
-    // Load participant users
-    await loadUsers([...chat.participants, chat.createdBy]);
+const convertChatToClientFormat = useCallback((chat: Chat): ChatWithUsers => {
+  // NO ASYNC OPERATIONS - just convert with what we have
+  const participants = chat.participants
+    .map(id => state.allUsers.get(id))
+    .filter((user): user is User => user !== null && user !== undefined);
 
-    // Convert participant IDs to User objects
-    const participants = chat.participants
-      .map(id => state.allUsers.get(id))
-      .filter((user): user is User => user !== null);
+  const createdByUser = state.allUsers.get(chat.createdBy) || {
+    id: chat.createdBy,
+    username: 'Unknown',
+    email: '',
+    firstName: 'Unknown',
+    lastName: 'User',
+    avatar: '',
+    phone: '',
+    bio: '',
+    isOnline: false,
+    lastSeen: new Date().toISOString(),
+    isVerified: false,
+    loginMethod: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 
-    const createdByUser = state.allUsers.get(chat.createdBy) || {
-      id: chat.createdBy,
-      username: 'Unknown',
-      email: '',
-      firstName: 'Unknown',
-      lastName: 'User',
-      avatar: '',
-      phone: '',
-      bio: '',
-      isOnline: false,
-      lastSeen: new Date().toISOString(),
-      isVerified: false,
-      loginMethod: '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    return {
-      ...chat,
-      participants,
-      createdByUser,
-      unreadCount: 0, // This would come from the API
-      isTyping: false,
-      typingUsers: [],
-      isPinned: getPinnedChats()?.includes(chat.id) || false,
-      isMuted: isChatMuted(chat.id),
-      isArchived: false, // This would come from the API
-    };
-  }, [state.allUsers, loadUsers]);
+  return {
+    ...chat,
+    participants,
+    createdByUser,
+    unreadCount: 0,
+    isTyping: false,
+    typingUsers: [],
+    isPinned: getPinnedChats()?.includes(chat.id) || false,
+    isMuted: isChatMuted(chat.id),
+    isArchived: false,
+  };
+}, [state.allUsers, getPinnedChats, isChatMuted]); 
 
 const handleApiResponse = useCallback(async (apiResponse: any): Promise<ChatWithUsers[]> => {
   // FIXED: Add early return for null/undefined/empty responses
@@ -615,20 +612,33 @@ const loadChats = useCallback(async () => {
     return null;
   }, [state.chats]);
 
-  const getChatDisplayName = useCallback((chat: ChatWithUsers): string => {
-    if (chat.type === 'group') {
-      return chat.name || 'Group Chat';
-    }
+const getChatDisplayName = useCallback((chat: ChatWithUsers, currentUser?: User | null): string => {
+  if (chat.type === 'group') {
+    return chat.name || 'Group Chat';
+  }
 
-    // For direct chats, find the other participant
-    // Note: We need to compare with current user ID, not chat ID
-    const otherParticipant = chat.participants.find(p => p.id !== getCurrentChatIdValue());
-    if (otherParticipant) {
-      return `${otherParticipant.firstName} ${otherParticipant.lastName}`;
-    }
+  // Get current user ID properly
+  const currentUserId = currentUser?.id;
+  if (!currentUserId) {
+    return 'Loading...';
+  }
 
+  // For direct chats, find the other participant
+  const otherParticipant = chat.participants?.find(p => 
+    p && p.id && p.id !== currentUserId
+  );
+  
+  if (!otherParticipant) {
     return 'Direct Chat';
-  }, [getCurrentChatIdValue]);
+  }
+
+  // Build display name properly
+  const firstName = otherParticipant.firstName || '';
+  const lastName = otherParticipant.lastName || '';
+  const fullName = `${firstName} ${lastName}`.trim();
+  
+  return fullName || otherParticipant.username || 'Unknown User';
+}, []);
 
   const getChatAvatar = useCallback((chat: ChatWithUsers): string => {
     if (chat.avatar) return chat.avatar;
