@@ -1,295 +1,412 @@
-// src/components/auth/magic-link-form.tsx
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import {
-  Mail,
-  Loader2,
-  CheckCircle,
-  AlertCircle,
-  RefreshCw,
-} from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Mail, Loader2, CheckCircle, XCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
-const magicLinkRequestSchema = z.object({
-  email: z.string().email("Please enter a valid email address"),
-  deviceType: z.enum(["web", "mobile", "desktop"]),
-  deviceName: z.string(),
-});
+type MagicLinkStep = "email" | "checking" | "register" | "complete" | "error";
 
-interface MagicLinkFormProps {
-  onSuccess?: (email: string) => void;
-  onSwitchToQR?: () => void;
-  className?: string;
-  defaultEmail?: string;
+interface MagicLinkState {
+  step: MagicLinkStep;
+  email: string;
+  token: string | null;
+  error: string | null;
+  isLoading: boolean;
+  requiresRegistration: boolean;
 }
 
-type FormData = z.infer<typeof magicLinkRequestSchema>;
-type FormState = "idle" | "sending" | "sent" | "error";
-
-export function MagicLinkForm({
-  onSuccess,
-  onSwitchToQR,
-  className,
-  defaultEmail,
-}: MagicLinkFormProps) {
-  const { sendMagicLink, isLoading, error } = useAuth();
-  const [formState, setFormState] = useState<FormState>("idle");
-  const [sentEmail, setSentEmail] = useState<string>("");
-  const [countdown, setCountdown] = useState<number>(0);
-
-  const form = useForm<FormData>({
-    resolver: zodResolver(magicLinkRequestSchema),
-    defaultValues: {
-      email: defaultEmail || "",
-      deviceType: "web",
-      deviceName: "Web Browser",
-    },
+export function MagicLinkAuth() {
+  const [state, setState] = useState<MagicLinkState>({
+    step: "email",
+    email: "",
+    token: null,
+    error: null,
+    isLoading: false,
+    requiresRegistration: false,
   });
 
-  // Detect device type
-  useEffect(() => {
-    const userAgent = navigator.userAgent.toLowerCase();
-    let deviceName = "Web Browser";
+  const [registrationData, setRegistrationData] = useState({
+    username: "",
+    firstName: "",
+    lastName: "",
+    phone: "",
+    bio: "",
+  });
 
-    if (/mobile|android|iphone|ipad|phone|tablet/.test(userAgent)) {
-      deviceName = "Mobile Device";
-      form.setValue("deviceType", "mobile");
-    } else if (/electron/.test(userAgent)) {
-      deviceName = "Desktop App";
-      form.setValue("deviceType", "desktop");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { sendMagicLink, verifyMagicLink, registerWithMagicLink, clearError } =
+    useAuth();
+
+  // Check for magic link token in URL params
+  useEffect(() => {
+    const token = searchParams.get("token");
+    if (token) {
+      setState((prev) => ({ ...prev, step: "checking", token }));
+      handleVerifyToken(token);
+    }
+  }, [searchParams]);
+
+  const updateState = (updates: Partial<MagicLinkState>) => {
+    setState((prev) => ({ ...prev, ...updates }));
+  };
+
+  const handleSendMagicLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!state.email.trim()) {
+      toast.error("Please enter your email address");
+      return;
     }
 
-    form.setValue("deviceName", deviceName);
-  }, [form]);
-
-  // Countdown timer for resend
-  useEffect(() => {
-    if (countdown > 0) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [countdown]);
-
-  const onSubmit = async (data: FormData) => {
     try {
-      setFormState("sending");
-      console.log("🔄 Sending magic link to:", data.email);
+      updateState({ isLoading: true, error: null });
 
-      const response = await sendMagicLink(data);
+      await sendMagicLink(state.email.trim());
 
-      console.log("✅ Magic link sent successfully:", response);
-      setFormState("sent");
-      setSentEmail(data.email);
-      setCountdown(60); // 60 second cooldown
+      updateState({
+        step: "checking",
+        isLoading: false,
+      });
 
-      onSuccess?.(data.email);
-    } catch (error) {
-      console.error("❌ Failed to send magic link:", error);
-      setFormState("error");
+      toast.success("Magic link sent! Check your email.");
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.message || "Failed to send magic link";
+      updateState({
+        isLoading: false,
+        error: errorMessage,
+        step: "error",
+      });
     }
   };
 
-  const handleResend = () => {
-    if (countdown > 0) return;
+  const handleVerifyToken = async (token: string) => {
+    try {
+      updateState({ isLoading: true, error: null });
 
-    setFormState("idle");
-    form.handleSubmit(onSubmit)();
+      const response = await verifyMagicLink(token);
+
+      updateState({
+        step: "complete",
+        isLoading: false,
+      });
+
+      toast.success("Successfully logged in!");
+      router.push("/chat");
+    } catch (error: any) {
+      if (error.requiresRegistration) {
+        updateState({
+          step: "register",
+          token: error.token,
+          isLoading: false,
+          requiresRegistration: true,
+        });
+      } else {
+        const errorMessage =
+          error.response?.data?.message || "Invalid or expired magic link";
+        updateState({
+          step: "error",
+          isLoading: false,
+          error: errorMessage,
+        });
+      }
+    }
   };
 
-  const handleChangeEmail = () => {
-    setFormState("idle");
-    setSentEmail("");
-    setCountdown(0);
+  const handleRegistration = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (
+      !registrationData.username.trim() ||
+      !registrationData.firstName.trim()
+    ) {
+      toast.error("Please fill in required fields");
+      return;
+    }
+
+    if (!state.token) {
+      toast.error("Registration token missing");
+      return;
+    }
+
+    try {
+      updateState({ isLoading: true, error: null });
+
+      await registerWithMagicLink(state.token, {
+        username: registrationData.username.trim(),
+        firstName: registrationData.firstName.trim(),
+        lastName: registrationData.lastName.trim(),
+        phone: registrationData.phone.trim() || undefined,
+        bio: registrationData.bio.trim() || undefined,
+      });
+
+      updateState({
+        step: "complete",
+        isLoading: false,
+      });
+
+      toast.success("Account created successfully!");
+      router.push("/chat");
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.message || "Registration failed";
+      updateState({
+        isLoading: false,
+        error: errorMessage,
+      });
+    }
   };
+
+  const handleRetry = () => {
+    clearError();
+    updateState({
+      step: "email",
+      error: null,
+      token: null,
+      requiresRegistration: false,
+    });
+  };
+
+  const renderEmailStep = () => (
+    <div className="w-full max-w-md mx-auto space-y-6">
+      <div className="text-center">
+        <Mail className="mx-auto h-12 w-12 text-blue-600" />
+        <h2 className="mt-6 text-3xl font-bold text-gray-900">
+          Sign in with Magic Link
+        </h2>
+        <p className="mt-2 text-sm text-gray-600">
+          Enter your email and we'll send you a secure login link
+        </p>
+      </div>
+
+      <form onSubmit={handleSendMagicLink} className="space-y-4">
+        <div>
+          <label htmlFor="email" className="sr-only">
+            Email address
+          </label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Enter your email address"
+            value={state.email}
+            onChange={(e) => updateState({ email: e.target.value })}
+            disabled={state.isLoading}
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={state.isLoading}
+          className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {state.isLoading ? (
+            <>
+              <Loader2 className="animate-spin -ml-1 mr-3 h-5 w-5" />
+              Sending...
+            </>
+          ) : (
+            "Send Magic Link"
+          )}
+        </button>
+      </form>
+    </div>
+  );
+
+  const renderCheckingStep = () => (
+    <div className="w-full max-w-md mx-auto text-center space-y-6">
+      <Loader2 className="mx-auto h-12 w-12 text-blue-600 animate-spin" />
+      <h2 className="text-2xl font-bold text-gray-900">
+        Checking your link...
+      </h2>
+      <p className="text-gray-600">
+        Please wait while we verify your magic link
+      </p>
+    </div>
+  );
+
+  const renderRegistrationStep = () => (
+    <div className="w-full max-w-md mx-auto space-y-6">
+      <div className="text-center">
+        <h2 className="text-3xl font-bold text-gray-900">
+          Complete Your Registration
+        </h2>
+        <p className="mt-2 text-sm text-gray-600">
+          We need a few more details to create your account
+        </p>
+      </div>
+
+      <form onSubmit={handleRegistration} className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label
+              htmlFor="firstName"
+              className="block text-sm font-medium text-gray-700"
+            >
+              First Name *
+            </label>
+            <input
+              id="firstName"
+              type="text"
+              required
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              value={registrationData.firstName}
+              onChange={(e) =>
+                setRegistrationData((prev) => ({
+                  ...prev,
+                  firstName: e.target.value,
+                }))
+              }
+              disabled={state.isLoading}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="lastName"
+              className="block text-sm font-medium text-gray-700"
+            >
+              Last Name
+            </label>
+            <input
+              id="lastName"
+              type="text"
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              value={registrationData.lastName}
+              onChange={(e) =>
+                setRegistrationData((prev) => ({
+                  ...prev,
+                  lastName: e.target.value,
+                }))
+              }
+              disabled={state.isLoading}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label
+            htmlFor="username"
+            className="block text-sm font-medium text-gray-700"
+          >
+            Username *
+          </label>
+          <input
+            id="username"
+            type="text"
+            required
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Choose a unique username"
+            value={registrationData.username}
+            onChange={(e) =>
+              setRegistrationData((prev) => ({
+                ...prev,
+                username: e.target.value,
+              }))
+            }
+            disabled={state.isLoading}
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor="phone"
+            className="block text-sm font-medium text-gray-700"
+          >
+            Phone Number
+          </label>
+          <input
+            id="phone"
+            type="tel"
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            placeholder="+1234567890"
+            value={registrationData.phone}
+            onChange={(e) =>
+              setRegistrationData((prev) => ({
+                ...prev,
+                phone: e.target.value,
+              }))
+            }
+            disabled={state.isLoading}
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor="bio"
+            className="block text-sm font-medium text-gray-700"
+          >
+            Bio
+          </label>
+          <textarea
+            id="bio"
+            rows={3}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Tell us about yourself..."
+            value={registrationData.bio}
+            onChange={(e) =>
+              setRegistrationData((prev) => ({ ...prev, bio: e.target.value }))
+            }
+            disabled={state.isLoading}
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={state.isLoading}
+          className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {state.isLoading ? (
+            <>
+              <Loader2 className="animate-spin -ml-1 mr-3 h-5 w-5" />
+              Creating Account...
+            </>
+          ) : (
+            "Create Account"
+          )}
+        </button>
+      </form>
+    </div>
+  );
+
+  const renderCompleteStep = () => (
+    <div className="w-full max-w-md mx-auto text-center space-y-6">
+      <CheckCircle className="mx-auto h-12 w-12 text-green-600" />
+      <h2 className="text-2xl font-bold text-gray-900">Welcome!</h2>
+      <p className="text-gray-600">You have been successfully authenticated</p>
+    </div>
+  );
+
+  const renderErrorStep = () => (
+    <div className="w-full max-w-md mx-auto text-center space-y-6">
+      <XCircle className="mx-auto h-12 w-12 text-red-600" />
+      <h2 className="text-2xl font-bold text-gray-900">
+        Authentication Failed
+      </h2>
+      <p className="text-red-600">{state.error}</p>
+      <button
+        onClick={handleRetry}
+        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+      >
+        Try Again
+      </button>
+    </div>
+  );
 
   return (
-    <div className={cn("space-y-4", className)}>
-      <Card>
-        <CardHeader className="text-center">
-          <div className="mx-auto w-12 h-12 bg-blue-100 dark:bg-blue-900/20 rounded-full flex items-center justify-center mb-4">
-            {formState === "sending" ? (
-              <Loader2 className="h-6 w-6 text-blue-600 dark:text-blue-400 animate-spin" />
-            ) : formState === "sent" ? (
-              <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
-            ) : formState === "error" ? (
-              <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
-            ) : (
-              <Mail className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-            )}
-          </div>
-
-          <CardTitle>
-            {formState === "sent"
-              ? "Check Your Email"
-              : "Sign in with Magic Link"}
-          </CardTitle>
-
-          <CardDescription>
-            {formState === "sent"
-              ? `We've sent a secure login link to ${sentEmail}`
-              : "Well send a secure link to your email. No password required!"}
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          {formState === "sent" ? (
-            // Success state
-            <div className="space-y-4">
-              <Alert>
-                <Mail className="h-4 w-4" />
-                <AlertDescription>
-                  <strong>Check your email!</strong> We've sent a magic link to{" "}
-                  <strong>{sentEmail}</strong>. Click the link to sign in
-                  instantly.
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-3">
-                <div className="text-sm text-muted-foreground text-center">
-                  <div className="space-y-1">
-                    <p>• Check your inbox (and spam folder)</p>
-                    <p>• Click the "Sign In Securely" button</p>
-                    <p>• The link expires in 15 minutes</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleResend}
-                    variant="outline"
-                    disabled={countdown > 0}
-                    className="flex-1"
-                  >
-                    {countdown > 0 ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Resend in {countdown}s
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Resend Link
-                      </>
-                    )}
-                  </Button>
-
-                  <Button
-                    onClick={handleChangeEmail}
-                    variant="ghost"
-                    className="flex-1"
-                  >
-                    Change Email
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            // Form state
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email Address</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="Enter your email address"
-                  {...form.register("email")}
-                  disabled={formState === "sending"}
-                  className={cn(
-                    form.formState.errors.email && "border-destructive"
-                  )}
-                />
-                {form.formState.errors.email && (
-                  <p className="text-sm text-destructive">
-                    {form.formState.errors.email.message}
-                  </p>
-                )}
-              </div>
-
-              {/* Show error if any */}
-              {formState === "error" && error && (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    {error.message ||
-                      "Failed to send magic link. Please try again."}
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={formState === "sending" || isLoading}
-                size="lg"
-              >
-                {formState === "sending" ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Sending Magic Link...
-                  </>
-                ) : (
-                  <>
-                    <Mail className="h-4 w-4 mr-2" />
-                    Send Magic Link
-                  </>
-                )}
-              </Button>
-            </form>
-          )}
-
-          {/* Additional info */}
-          <div className="text-center">
-            <div className="text-xs text-muted-foreground space-y-1">
-              <p>🔐 Secure • 🚀 Fast • 🔑 No passwords</p>
-              <p>The link will expire in 15 minutes for security</p>
-            </div>
-          </div>
-
-          {/* Switch to QR code option */}
-          {onSwitchToQR && formState !== "sent" && (
-            <div className="text-center pt-4 border-t">
-              <p className="text-sm text-muted-foreground mb-2">
-                Prefer to scan a QR code?
-              </p>
-              <Button
-                variant="outline"
-                onClick={onSwitchToQR}
-                size="sm"
-                disabled={formState === "sending"}
-              >
-                Use QR Code Instead
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Development debug info */}
-      {process.env.NODE_ENV === "development" && formState === "sent" && (
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            <strong>Development Mode:</strong> Check your server console for the
-            magic link if email delivery is not configured.
-          </AlertDescription>
-        </Alert>
-      )}
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="w-full max-w-md">
+        {state.step === "email" && renderEmailStep()}
+        {state.step === "checking" && renderCheckingStep()}
+        {state.step === "register" && renderRegistrationStep()}
+        {state.step === "complete" && renderCompleteStep()}
+        {state.step === "error" && renderErrorStep()}
+      </div>
     </div>
   );
 }

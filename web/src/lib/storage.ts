@@ -102,10 +102,11 @@ class StorageManager {
   /**
    * Get stored authentication tokens
    */
-  getTokens(): { accessToken: string | null; refreshToken: string | null } {
+  getTokens(): { accessToken: string | null; refreshToken: string | null; expiresAt: string | null } {
     return {
       accessToken: this.getItem(STORAGE_KEYS.ACCESS_TOKEN),
       refreshToken: this.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+      expiresAt: this.getItem(STORAGE_KEYS.TOKEN_EXPIRES_AT),
     };
   }
 

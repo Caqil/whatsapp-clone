@@ -1,8 +1,10 @@
+// src/hooks/use-socket.ts - Complete WebSocket hook with all event types
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { 
-  WSMessage, 
+import { useRouter } from 'next/navigation';
+import type {
+  WSMessage,
   WSMessageType,
   NewMessagePayload,
   MessageStatusPayload,
@@ -10,72 +12,222 @@ import type {
   TypingPayload,
   UserStatusPayload,
   ChatActionPayload,
-  FileUploadPayload
+  FileUploadPayload,
 } from '@/types/api';
 import { getStoredTokens } from '@/lib/storage';
-import { WEBSOCKET_CONFIG, WEBSOCKET_EVENTS } from '@/lib/constants';
+import { buildWebSocketUrl } from '@/config/api-endpoints';
 import { toast } from 'sonner';
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
+type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'failed' | 'reconnecting';
 
 interface UseSocketState {
   socket: WebSocket | null;
   isConnected: boolean;
   connectionState: ConnectionState;
-  reconnectAttempts: number;
   lastError: string | null;
-  lastPingTime: number | null;
-  latency: number | null;
+  reconnectAttempts: number;
+  lastMessageTime: number;
+  messageQueue: WSMessage[];
 }
 
 interface UseSocketActions {
   connect: () => void;
   disconnect: () => void;
-  reconnect: () => void;
-  on: (event: string, callback: (...args: any[]) => void) => void;
-  off: (event: string, callback: (...args: any[]) => void) => void;
-  emit: (event: string, payload?: any) => void;
-  sendMessage: (type: string, payload: any) => void;
-  startTyping: (chatId: string) => void;
-  stopTyping: (chatId: string) => void;
-  setOnlineStatus: (isOnline: boolean) => void;
-  joinChat: (chatId: string) => void;
-  leaveChat: (chatId: string) => void;
-  sendFileUploadProgress: (uploadId: string, progress: number) => void;
-  sendFileUploadComplete: (uploadId: string, fileUrl: string) => void;
-  sendFileUploadError: (uploadId: string, error: string) => void;
-  ping: () => void;
-  getConnectionInfo: () => {
-    state: ConnectionState;
-    attempts: number;
-    latency: number | null;
-  };
+  sendMessage: (message: WSMessage) => void;
+  
+  // Event subscriptions
+  onMessage: (callback: (message: WSMessage) => void) => () => void;
+  onNewMessage: (callback: (payload: NewMessagePayload) => void) => () => void;
+  onMessageStatus: (callback: (payload: MessageStatusPayload) => void) => () => void;
+  onMessageReaction: (callback: (payload: MessageReactionPayload) => void) => () => void;
+  onTyping: (callback: (payload: TypingPayload) => void) => () => void;
+  onUserStatus: (callback: (payload: UserStatusPayload) => void) => () => void;
+  onChatAction: (callback: (payload: ChatActionPayload) => void) => () => void;
+  onFileUpload: (callback: (payload: FileUploadPayload) => void) => () => void;
+  onError: (callback: (error: string) => void) => () => void;
 }
 
 const INITIAL_STATE: UseSocketState = {
   socket: null,
   isConnected: false,
   connectionState: 'disconnected',
-  reconnectAttempts: 0,
   lastError: null,
-  lastPingTime: null,
-  latency: null,
+  reconnectAttempts: 0,
+  lastMessageTime: 0,
+  messageQueue: [],
 };
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAY = 1000; // 1 second
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const MESSAGE_QUEUE_LIMIT = 100;
 
 export function useSocket(): UseSocketState & UseSocketActions {
   const [state, setState] = useState<UseSocketState>(INITIAL_STATE);
+  const router = useRouter();
   
-  const reconnectTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
-  const heartbeatTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
-  const pingTimeRef = useRef<number>(0);
-  const shouldConnectRef = useRef<boolean>(false);
-  const eventListenersRef = useRef<Map<string, Set<(...args: any[]) => void>>>(new Map());
+  // Refs for managing connections and timers
+  const shouldConnectRef = useRef(false);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const eventCallbacksRef = useRef<Map<string, Set<Function>>>(new Map());
 
+  // Helper function to update state
   const updateState = useCallback((updates: Partial<UseSocketState>) => {
     setState(prev => ({ ...prev, ...updates }));
   }, []);
 
-  // ========== CONNECTION MANAGEMENT ==========
+  // ========== Event Management ==========
+
+  const addEventCallback = useCallback((event: string, callback: Function): (() => void) => {
+    if (!eventCallbacksRef.current.has(event)) {
+      eventCallbacksRef.current.set(event, new Set());
+    }
+    eventCallbacksRef.current.get(event)!.add(callback);
+
+    // Return unsubscribe function
+    return () => {
+      eventCallbacksRef.current.get(event)?.delete(callback);
+    };
+  }, []);
+
+  const triggerEventCallbacks = useCallback((event: string, payload: any) => {
+    const callbacks = eventCallbacksRef.current.get(event);
+    if (callbacks) {
+      callbacks.forEach(callback => {
+        try {
+          callback(payload);
+        } catch (error) {
+          console.error(`Error in ${event} callback:`, error);
+        }
+      });
+    }
+  }, []);
+
+  // ========== WebSocket Message Handling ==========
+
+  const handleWebSocketMessage = useCallback((data: WSMessage) => {
+    console.log('📨 WebSocket message received:', data.type);
+    
+    updateState({ lastMessageTime: Date.now() });
+    
+    // Trigger generic message callbacks
+    triggerEventCallbacks('message', data);
+    
+    // Handle specific message types
+    switch (data.type) {
+      case 'new_message':
+        triggerEventCallbacks('new_message', data.payload as NewMessagePayload);
+        break;
+        
+      case 'message_status':
+        triggerEventCallbacks('message_status', data.payload as MessageStatusPayload);
+        break;
+        
+      case 'message_reaction':
+        triggerEventCallbacks('message_reaction', data.payload as MessageReactionPayload);
+        break;
+        
+      case 'message_deleted':
+        triggerEventCallbacks('message_deleted', data.payload);
+        break;
+        
+      case 'message_edited':
+        triggerEventCallbacks('message_edited', data.payload);
+        break;
+        
+      case 'typing_start':
+      case 'typing_stop':
+        triggerEventCallbacks('typing', data.payload as TypingPayload);
+        break;
+        
+      case 'user_online':
+      case 'user_offline':
+        triggerEventCallbacks('user_status', data.payload as UserStatusPayload);
+        break;
+        
+      case 'user_join_chat':
+      case 'user_leave_chat':
+        triggerEventCallbacks('chat_action', data.payload as ChatActionPayload);
+        break;
+        
+      case 'chat_created':
+      case 'chat_updated':
+        triggerEventCallbacks('chat_action', data.payload as ChatActionPayload);
+        break;
+        
+      case 'file_upload_progress':
+      case 'file_upload_complete':
+      case 'file_upload_error':
+        triggerEventCallbacks('file_upload', data.payload as FileUploadPayload);
+        break;
+        
+      case 'error':
+        const errorMessage = typeof data.payload === 'string' ? data.payload : data.payload?.message || 'Unknown error';
+        triggerEventCallbacks('error', errorMessage);
+        toast.error(`WebSocket Error: ${errorMessage}`);
+        break;
+        
+      case 'pong':
+        console.log('🏓 Pong received');
+        break;
+        
+      default:
+        console.warn('🤷 Unknown WebSocket message type:', data.type);
+    }
+  }, [updateState, triggerEventCallbacks]);
+
+  // ========== Heartbeat Management ==========
+
+  const startHeartbeat = useCallback((socket: WebSocket) => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
+
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        console.log('🏓 Sending ping');
+        socket.send(JSON.stringify({ type: 'ping', payload: {} }));
+      }
+    }, HEARTBEAT_INTERVAL);
+  }, []);
+
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+  }, []);
+
+  // ========== Reconnection Logic ==========
+
+  const scheduleReconnect = useCallback(() => {
+    if (state.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.error('❌ Max reconnection attempts reached');
+      updateState({
+        connectionState: 'failed',
+        lastError: 'Connection failed after multiple attempts',
+      });
+      toast.error('Connection failed. Please refresh the page.');
+      return;
+    }
+
+    const delay = RECONNECT_DELAY * Math.pow(2, state.reconnectAttempts); // Exponential backoff
+    console.log(`🔄 Scheduling reconnect in ${delay}ms (attempt ${state.reconnectAttempts + 1})`);
+
+    updateState({
+      connectionState: 'reconnecting',
+      reconnectAttempts: state.reconnectAttempts + 1,
+    });
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      if (shouldConnectRef.current) {
+        connect();
+      }
+    }, delay);
+  }, [state.reconnectAttempts, updateState]);
+
+  // ========== Connection Management ==========
 
   const connect = useCallback(() => {
     if (state.socket?.readyState === WebSocket.OPEN) {
@@ -97,11 +249,8 @@ export function useSocket(): UseSocketState & UseSocketActions {
       updateState({ connectionState: 'connecting', lastError: null });
       shouldConnectRef.current = true;
 
-      // Build correct WebSocket URL for your backend
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-      const wsUrl = `${baseUrl.replace('http', 'ws')}/api/ws?token=${encodeURIComponent(tokens.accessToken)}`;
-      
-      console.log('🔌 Connecting to WebSocket:', wsUrl);
+      const wsUrl = buildWebSocketUrl(tokens.accessToken);
+      console.log('🔌 Connecting to WebSocket:', wsUrl.replace(/token=[^&]+/, 'token=***'));
 
       const newSocket = new WebSocket(wsUrl);
 
@@ -118,6 +267,15 @@ export function useSocket(): UseSocketState & UseSocketActions {
         // Start heartbeat
         startHeartbeat(newSocket);
 
+        // Send queued messages
+        if (state.messageQueue.length > 0) {
+          console.log(`📤 Sending ${state.messageQueue.length} queued messages`);
+          state.messageQueue.forEach(message => {
+            newSocket.send(JSON.stringify(message));
+          });
+          updateState({ messageQueue: [] });
+        }
+
         if (state.reconnectAttempts > 0) {
           toast.success('Reconnected to chat');
         }
@@ -128,13 +286,46 @@ export function useSocket(): UseSocketState & UseSocketActions {
         updateState({
           isConnected: false,
           connectionState: 'disconnected',
-          lastError: event.reason,
+          lastError: event.reason || `Connection closed (${event.code})`,
         });
 
         stopHeartbeat();
 
-        if (shouldConnectRef.current && event.code !== 1000) {
-          scheduleReconnect();
+        // Handle different close codes
+        if (event.code === 1000) {
+          // Normal closure
+          console.log('✅ WebSocket closed normally');
+        } else if (event.code === 1001) {
+          // Going away
+          console.log('👋 WebSocket closed - going away');
+        } else if (event.code === 1006) {
+          // Abnormal closure
+          console.log('💥 WebSocket closed abnormally');
+          if (shouldConnectRef.current) {
+            scheduleReconnect();
+          }
+        } else if (event.code === 1008 || event.code === 1011) {
+          // Server error
+          console.error('🚨 WebSocket server error');
+          updateState({
+            connectionState: 'failed',
+            lastError: 'Server error',
+          });
+          toast.error('Server connection error');
+        } else if (event.code === 4001) {
+          // Unauthorized
+          console.error('🚫 WebSocket unauthorized');
+          updateState({
+            connectionState: 'failed',
+            lastError: 'Unauthorized',
+          });
+          toast.error('Authentication failed');
+          router.push('/auth');
+        } else {
+          // Other errors
+          if (shouldConnectRef.current) {
+            scheduleReconnect();
+          }
         }
       };
 
@@ -156,6 +347,7 @@ export function useSocket(): UseSocketState & UseSocketActions {
           handleWebSocketMessage(data);
         } catch (error) {
           console.error('❌ Error parsing WebSocket message:', error);
+          triggerEventCallbacks('error', 'Failed to parse message');
         }
       };
 
@@ -167,22 +359,26 @@ export function useSocket(): UseSocketState & UseSocketActions {
         connectionState: 'failed',
         lastError: error instanceof Error ? error.message : 'Connection failed',
       });
+
+      if (shouldConnectRef.current) {
+        scheduleReconnect();
+      }
     }
-  }, [state.socket, state.reconnectAttempts, updateState]);
+  }, [state.socket, state.messageQueue, state.reconnectAttempts, updateState, startHeartbeat, stopHeartbeat, scheduleReconnect, handleWebSocketMessage, triggerEventCallbacks, router]);
 
   const disconnect = useCallback(() => {
     console.log('🔌 Disconnecting WebSocket');
     shouldConnectRef.current = false;
 
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = undefined;
+    // Clear timers
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
     }
-
     stopHeartbeat();
 
+    // Close socket
     if (state.socket) {
-      state.socket.close();
+      state.socket.close(1000, 'Manual disconnect');
     }
 
     updateState({
@@ -192,204 +388,133 @@ export function useSocket(): UseSocketState & UseSocketActions {
       reconnectAttempts: 0,
       lastError: null,
     });
-  }, [state.socket, updateState]);
+  }, [state.socket, updateState, stopHeartbeat]);
 
-  const reconnect = useCallback(() => {
-    console.log('🔄 Manual reconnect triggered');
-    disconnect();
-    setTimeout(() => {
-      connect();
-    }, 1000);
-  }, [disconnect, connect]);
+  // ========== Message Sending ==========
 
-  // ========== MESSAGE HANDLING ==========
-
-  const handleWebSocketMessage = useCallback((data: WSMessage) => {
-    console.log('📥 Received WebSocket message:', data.type);
-    
-    // Emit to registered listeners
-    const listeners = eventListenersRef.current.get(data.type);
-    if (listeners) {
-      listeners.forEach(callback => {
-        try {
-          callback(data.payload);
-        } catch (error) {
-          console.error(`❌ Error in event listener for ${data.type}:`, error);
-        }
-      });
-    }
-
-    // Handle pong for latency calculation
-    if (data.type === 'pong') {
-      const latency = Date.now() - pingTimeRef.current;
-      updateState({ latency, lastPingTime: Date.now() });
-    }
-  }, [updateState]);
-
-  const sendMessage = useCallback((type: string, payload: any) => {
-    if (state.socket?.readyState !== WebSocket.OPEN) {
-      console.warn('⚠️ Cannot send message: WebSocket not connected');
-      return;
-    }
-
-    const message: WSMessage = { type, payload };
-    
-    try {
-      state.socket.send(JSON.stringify(message));
-      console.log('📤 Sent WebSocket message:', type);
-    } catch (error) {
-      console.error('❌ Error sending WebSocket message:', error);
-    }
-  }, [state.socket]);
-
-  // ========== EVENT LISTENERS ==========
-
-  const on = useCallback((event: string, callback: (...args: any[]) => void) => {
-    const listeners = eventListenersRef.current.get(event) || new Set();
-    listeners.add(callback);
-    eventListenersRef.current.set(event, listeners);
-  }, []);
-
-  const off = useCallback((event: string, callback: (...args: any[]) => void) => {
-    const listeners = eventListenersRef.current.get(event);
-    if (listeners) {
-      listeners.delete(callback);
-    }
-  }, []);
-
-  // ========== HELPER FUNCTIONS ==========
-
-  const startHeartbeat = useCallback((socket: WebSocket) => {
-    stopHeartbeat();
-    
-    heartbeatTimerRef.current = setInterval(() => {
-      if (socket.readyState === WebSocket.OPEN) {
-        pingTimeRef.current = Date.now();
-        sendMessage('ping', { timestamp: pingTimeRef.current });
-      }
-    }, WEBSOCKET_CONFIG.HEARTBEAT_INTERVAL || 30000);
-  }, [sendMessage]);
-
-  const stopHeartbeat = useCallback(() => {
-    if (heartbeatTimerRef.current) {
-      clearInterval(heartbeatTimerRef.current);
-      heartbeatTimerRef.current = undefined;
-    }
-  }, []);
-
-  const scheduleReconnect = useCallback(() => {
-    if (!shouldConnectRef.current) return;
-
-    const currentAttempts = state.reconnectAttempts;
-    
-    if (currentAttempts >= (WEBSOCKET_CONFIG.MAX_RECONNECT_ATTEMPTS || 5)) {
-      console.log('❌ Max reconnection attempts reached');
-      updateState({
-        connectionState: 'failed',
-        lastError: 'Max reconnection attempts reached',
-      });
-      toast.error('Connection lost. Please refresh the page.');
-      return;
-    }
-
-    const delay = Math.min(
-      (WEBSOCKET_CONFIG.RECONNECT_DELAY || 1000) * Math.pow(2, currentAttempts),
-      WEBSOCKET_CONFIG.MAX_RECONNECT_DELAY || 30000
-    );
-
-    console.log(`🔄 Scheduling reconnect attempt ${currentAttempts + 1} in ${delay}ms`);
-    
-    updateState({
-      connectionState: 'reconnecting',
-      reconnectAttempts: currentAttempts + 1,
-    });
-
-    reconnectTimerRef.current = setTimeout(() => {
-      if (shouldConnectRef.current) {
+  const sendMessage = useCallback((message: WSMessage) => {
+    if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
+      console.warn('⚠️ WebSocket not connected, queueing message');
+      
+      // Queue message for when connection is restored
+      setState(prev => ({
+        ...prev,
+        messageQueue: [...prev.messageQueue.slice(-MESSAGE_QUEUE_LIMIT + 1), message],
+      }));
+      
+      // Try to reconnect if not already trying
+      if (shouldConnectRef.current && state.connectionState === 'disconnected') {
         connect();
       }
-    }, delay);
-  }, [state.reconnectAttempts, updateState, connect]);
+      
+      return;
+    }
 
-  // ========== ACTION FUNCTIONS ==========
+    try {
+      const messageString = JSON.stringify(message);
+      state.socket.send(messageString);
+      console.log('📤 WebSocket message sent:', message.type);
+    } catch (error) {
+      console.error('❌ Failed to send WebSocket message:', error);
+      triggerEventCallbacks('error', 'Failed to send message');
+    }
+  }, [state.socket, state.connectionState, connect, triggerEventCallbacks]);
 
-  const emit = useCallback((event: string, payload?: any) => {
-    sendMessage(event, payload);
-  }, [sendMessage]);
+  // ========== Event Subscription Methods ==========
 
-  const startTyping = useCallback((chatId: string) => {
-    sendMessage(WEBSOCKET_EVENTS.TYPING_START, { chatId });
-  }, [sendMessage]);
+  const onMessage = useCallback((callback: (message: WSMessage) => void) => {
+    return addEventCallback('message', callback);
+  }, [addEventCallback]);
 
-  const stopTyping = useCallback((chatId: string) => {
-    sendMessage(WEBSOCKET_EVENTS.TYPING_STOP, { chatId });
-  }, [sendMessage]);
+  const onNewMessage = useCallback((callback: (payload: NewMessagePayload) => void) => {
+    return addEventCallback('new_message', callback);
+  }, [addEventCallback]);
 
-  const setOnlineStatus = useCallback((isOnline: boolean) => {
-    sendMessage(isOnline ? WEBSOCKET_EVENTS.USER_ONLINE : WEBSOCKET_EVENTS.USER_OFFLINE, { isOnline });
-  }, [sendMessage]);
+  const onMessageStatus = useCallback((callback: (payload: MessageStatusPayload) => void) => {
+    return addEventCallback('message_status', callback);
+  }, [addEventCallback]);
 
-  const joinChat = useCallback((chatId: string) => {
-    sendMessage(WEBSOCKET_EVENTS.USER_JOIN_CHAT, { chatId });
-  }, [sendMessage]);
+  const onMessageReaction = useCallback((callback: (payload: MessageReactionPayload) => void) => {
+    return addEventCallback('message_reaction', callback);
+  }, [addEventCallback]);
 
-  const leaveChat = useCallback((chatId: string) => {
-    sendMessage(WEBSOCKET_EVENTS.USER_LEAVE_CHAT, { chatId });
-  }, [sendMessage]);
+  const onTyping = useCallback((callback: (payload: TypingPayload) => void) => {
+    return addEventCallback('typing', callback);
+  }, [addEventCallback]);
 
-  const sendFileUploadProgress = useCallback((uploadId: string, progress: number) => {
-    sendMessage(WEBSOCKET_EVENTS.FILE_UPLOAD_PROGRESS, { uploadId, progress });
-  }, [sendMessage]);
+  const onUserStatus = useCallback((callback: (payload: UserStatusPayload) => void) => {
+    return addEventCallback('user_status', callback);
+  }, [addEventCallback]);
 
-  const sendFileUploadComplete = useCallback((uploadId: string, fileUrl: string) => {
-    sendMessage(WEBSOCKET_EVENTS.FILE_UPLOAD_COMPLETE, { uploadId, fileUrl });
-  }, [sendMessage]);
+  const onChatAction = useCallback((callback: (payload: ChatActionPayload) => void) => {
+    return addEventCallback('chat_action', callback);
+  }, [addEventCallback]);
 
-  const sendFileUploadError = useCallback((uploadId: string, error: string) => {
-    sendMessage(WEBSOCKET_EVENTS.FILE_UPLOAD_ERROR, { uploadId, error });
-  }, [sendMessage]);
+  const onFileUpload = useCallback((callback: (payload: FileUploadPayload) => void) => {
+    return addEventCallback('file_upload', callback);
+  }, [addEventCallback]);
 
-  const ping = useCallback(() => {
-    pingTimeRef.current = Date.now();
-    sendMessage('ping', { timestamp: pingTimeRef.current });
-  }, [sendMessage]);
+  const onError = useCallback((callback: (error: string) => void) => {
+    return addEventCallback('error', callback);
+  }, [addEventCallback]);
 
-  const getConnectionInfo = useCallback(() => ({
-    state: state.connectionState,
-    attempts: state.reconnectAttempts,
-    latency: state.latency,
-  }), [state.connectionState, state.reconnectAttempts, state.latency]);
-
-  // ========== LIFECYCLE ==========
+  // ========== Lifecycle Management ==========
 
   useEffect(() => {
+    // Auto-connect when component mounts
+    const tokens = getStoredTokens();
+    if (tokens?.accessToken) {
+      connect();
+    }
+
     return () => {
       shouldConnectRef.current = false;
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
       }
       stopHeartbeat();
+      
+      if (state.socket) {
+        state.socket.close(1000, 'Component unmounting');
+      }
     };
-  }, [stopHeartbeat]);
+  }, []); // Only run on mount
+
+  // Handle visibility change
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Page became visible, reconnect if needed
+        const tokens = getStoredTokens();
+        if (tokens?.accessToken && !state.isConnected && shouldConnectRef.current) {
+          console.log('👁️ Page visible, attempting to reconnect');
+          connect();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [state.isConnected, connect]);
 
   return {
+    // State
     ...state,
+    
+    // Actions
     connect,
     disconnect,
-    reconnect,
-    on,
-    off,
-    emit,
     sendMessage,
-    startTyping,
-    stopTyping,
-    setOnlineStatus,
-    joinChat,
-    leaveChat,
-    sendFileUploadProgress,
-    sendFileUploadComplete,
-    sendFileUploadError,
-    ping,
-    getConnectionInfo,
+    
+    // Event subscriptions
+    onMessage,
+    onNewMessage,
+    onMessageStatus,
+    onMessageReaction,
+    onTyping,
+    onUserStatus,
+    onChatAction,
+    onFileUpload,
+    onError,
   };
 }

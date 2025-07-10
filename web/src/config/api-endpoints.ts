@@ -1,10 +1,10 @@
-// src/config/api-endpoints.ts
+// src/config/api-endpoints.ts - Complete API endpoints matching your curl documentation
 export const API_ENDPOINTS = {
   // ========== Authentication Endpoints ==========
   AUTH: {
     // Magic Link Authentication
     MAGIC_LINK: '/auth/magic-link',
-    VERIFY: '/verify',
+    VERIFY: '/auth/verify',
     REGISTER_MAGIC: '/auth/register-magic',
     
     // QR Code Authentication
@@ -49,7 +49,8 @@ export const API_ENDPOINTS = {
   MESSAGES: {
     BASE: '/messages',
     BY_ID: (messageId: string) => `/messages/${messageId}`,
-    CHAT: '/messages/chat',
+    
+    // Chat messages
     CHAT_MESSAGES: (chatId: string) => `/messages/chat/${chatId}`,
     
     // Message Status
@@ -80,7 +81,7 @@ export const API_ENDPOINTS = {
 
   // ========== Health and Documentation ==========
   HEALTH: '/health',
-  DOCS: '/docs',
+  DOCS: '/api/docs',
 } as const;
 
 // ========== Build URL Helper Functions ==========
@@ -97,10 +98,9 @@ export function buildApiUrl(endpoint: string, baseUrl?: string): string {
  * Build WebSocket URL
  */
 export function buildWebSocketUrl(token?: string, baseUrl?: string): string {
-  // Use WebSocket protocol directly for native WebSocket connection
   const base = baseUrl || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
   const wsBase = base.replace('http://', 'ws://').replace('https://', 'wss://');
-  const wsUrl = `${wsBase}/api/ws`; // Your backend endpoint
+  const wsUrl = `${wsBase}/api/ws`;
   
   if (token) {
     return `${wsUrl}?token=${encodeURIComponent(token)}`;
@@ -108,11 +108,12 @@ export function buildWebSocketUrl(token?: string, baseUrl?: string): string {
   
   return wsUrl;
 }
+
 /**
  * Build URL with query parameters
  */
 export function buildUrlWithParams(endpoint: string, params: Record<string, any>): string {
-  const url = new URL(endpoint, 'http://localhost'); // Use dummy base for URL construction
+  const url = new URL(endpoint, 'http://localhost');
   
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
@@ -126,17 +127,22 @@ export function buildUrlWithParams(endpoint: string, params: Record<string, any>
 // ========== Endpoint Helper Functions ==========
 
 export const authEndpoints = {
+  // Magic Link Authentication
   sendMagicLink: () => API_ENDPOINTS.AUTH.MAGIC_LINK,
   verifyMagicLink: () => API_ENDPOINTS.AUTH.VERIFY,
   registerWithMagicLink: (token?: string) => 
     token ? `${API_ENDPOINTS.AUTH.REGISTER_MAGIC}?token=${encodeURIComponent(token)}` : API_ENDPOINTS.AUTH.REGISTER_MAGIC,
   
+  // QR Code Authentication
   generateQRCode: () => API_ENDPOINTS.AUTH.QR.GENERATE,
   checkQRStatus: (secret: string) => buildUrlWithParams(API_ENDPOINTS.AUTH.QR.STATUS, { secret }),
-  loginWithQRCode: (secret: string) => buildUrlWithParams(API_ENDPOINTS.AUTH.QR.LOGIN, { secret }),
+  loginWithQRCode: () => API_ENDPOINTS.AUTH.QR.LOGIN,
   
+  // Session Management
   refreshToken: () => API_ENDPOINTS.AUTH.REFRESH,
   logout: () => API_ENDPOINTS.AUTH.LOGOUT,
+  validateToken: () => API_ENDPOINTS.AUTH.VALIDATE,
+  cleanup: () => API_ENDPOINTS.AUTH.CLEANUP,
   
   // QR protected endpoints
   scanQRCode: () => API_ENDPOINTS.QR.SCAN,
@@ -157,22 +163,23 @@ export const chatEndpoints = {
   createChat: () => API_ENDPOINTS.CHATS.BASE,
   getUserChats: () => API_ENDPOINTS.CHATS.BASE,
   getChat: (chatId: string) => API_ENDPOINTS.CHATS.BY_ID(chatId),
-  updateChat: (chatId: string) => API_ENDPOINTS.CHATS.BY_ID(chatId),
-  deleteChat: (chatId: string) => API_ENDPOINTS.CHATS.BY_ID(chatId),
 };
 
 export const messageEndpoints = {
+  // Core message operations
   sendMessage: () => API_ENDPOINTS.MESSAGES.BASE,
   getMessage: (messageId: string) => API_ENDPOINTS.MESSAGES.BY_ID(messageId),
   
+  // Chat messages
   getChatMessages: (chatId: string, params?: { limit?: number; offset?: number }) => 
     buildUrlWithParams(API_ENDPOINTS.MESSAGES.CHAT_MESSAGES(chatId), params || {}),
   
+  // Message status
   markAsRead: (messageId: string) => API_ENDPOINTS.MESSAGES.READ(messageId),
   markMultipleAsRead: () => API_ENDPOINTS.MESSAGES.READ_MULTIPLE,
   getUnreadCount: (chatId: string) => API_ENDPOINTS.MESSAGES.UNREAD_COUNT(chatId),
   
-  // File upload
+  // File upload and media
   uploadFile: () => API_ENDPOINTS.MESSAGES.UPLOAD,
   sendMediaMessage: () => API_ENDPOINTS.MESSAGES.MEDIA,
   getMediaMessages: (chatId: string, params?: { type?: string; limit?: number; offset?: number }) =>
@@ -192,43 +199,29 @@ export const messageEndpoints = {
     buildUrlWithParams(API_ENDPOINTS.MESSAGES.SEARCH(chatId), params || {}),
 };
 
-// ========== URL Pattern Matchers ==========
+// ========== Rate Limiting Info (from your API docs) ==========
 
-/**
- * Check if URL matches a pattern
- */
-export function matchesEndpoint(url: string, pattern: string): boolean {
-  // Convert pattern to regex (simple implementation)
-  const regexPattern = pattern
-    .replace(/:\w+/g, '[^/]+') // Replace :id with [^/]+
-    .replace(/\*/g, '.*'); // Replace * with .*
+export const RATE_LIMITS = {
+  // Auth endpoints: 3-10 requests per minute
+  [API_ENDPOINTS.AUTH.MAGIC_LINK]: { requests: 5, window: 60 },
+  [API_ENDPOINTS.AUTH.VERIFY]: { requests: 10, window: 60 },
+  [API_ENDPOINTS.AUTH.QR.GENERATE]: { requests: 10, window: 60 },
+  [API_ENDPOINTS.AUTH.LOGIN]: { requests: 5, window: 60 },
+  [API_ENDPOINTS.AUTH.REGISTER]: { requests: 3, window: 60 },
   
-  const regex = new RegExp(`^${regexPattern}$`);
-  return regex.test(url);
-}
-
-/**
- * Extract parameters from URL based on pattern
- */
-export function extractUrlParams(url: string, pattern: string): Record<string, string> {
-  const params: Record<string, string> = {};
+  // Message sending: 100 requests per minute
+  [API_ENDPOINTS.MESSAGES.BASE]: { requests: 100, window: 60 },
   
-  const patternParts = pattern.split('/');
-  const urlParts = url.split('/');
+  // File upload: 20 requests per minute
+  [API_ENDPOINTS.MESSAGES.UPLOAD]: { requests: 20, window: 60 },
+  [API_ENDPOINTS.MESSAGES.MEDIA]: { requests: 20, window: 60 },
   
-  if (patternParts.length !== urlParts.length) {
-    return params;
-  }
+  // User search: 30 requests per minute
+  [API_ENDPOINTS.USERS.SEARCH]: { requests: 30, window: 60 },
   
-  patternParts.forEach((part, index) => {
-    if (part.startsWith(':')) {
-      const paramName = part.slice(1);
-      params[paramName] = urlParts[index];
-    }
-  });
-  
-  return params;
-}
+  // Default rate limit
+  DEFAULT: { requests: 60, window: 60 },
+} as const;
 
 // ========== Endpoint Categories ==========
 
@@ -244,6 +237,8 @@ export const ENDPOINT_CATEGORIES = {
     API_ENDPOINTS.AUTH.LOGOUT,
     API_ENDPOINTS.AUTH.REGISTER,
     API_ENDPOINTS.AUTH.LOGIN,
+    API_ENDPOINTS.AUTH.VALIDATE,
+    API_ENDPOINTS.AUTH.CLEANUP,
   ],
   
   PROTECTED: [
@@ -275,41 +270,8 @@ export const ENDPOINT_CATEGORIES = {
  * Check if endpoint requires authentication
  */
 export function requiresAuth(endpoint: string): boolean {
-  return ENDPOINT_CATEGORIES.PROTECTED.some(pattern => 
-    matchesEndpoint(endpoint, pattern) || endpoint.startsWith(pattern)
-  );
+  return !ENDPOINT_CATEGORIES.PUBLIC.some(pattern => endpoint.startsWith(pattern));
 }
-
-/**
- * Check if endpoint is public
- */
-export function isPublicEndpoint(endpoint: string): boolean {
-  return ENDPOINT_CATEGORIES.PUBLIC.some(pattern => 
-    matchesEndpoint(endpoint, pattern) || endpoint.startsWith(pattern)
-  );
-}
-
-// ========== Rate Limiting Info ==========
-
-export const RATE_LIMITS = {
-  // Auth endpoints
-  [API_ENDPOINTS.AUTH.MAGIC_LINK]: { requests: 5, window: 60 }, // 5 per minute
-  [API_ENDPOINTS.AUTH.VERIFY]: { requests: 10, window: 60 }, // 10 per minute
-  [API_ENDPOINTS.AUTH.QR.GENERATE]: { requests: 10, window: 60 }, // 10 per minute
-  [API_ENDPOINTS.AUTH.LOGIN]: { requests: 5, window: 60 }, // 5 per minute
-  [API_ENDPOINTS.AUTH.REGISTER]: { requests: 3, window: 60 }, // 3 per minute
-  
-  // Message endpoints
-  [API_ENDPOINTS.MESSAGES.BASE]: { requests: 100, window: 60 }, // 100 per minute
-  [API_ENDPOINTS.MESSAGES.UPLOAD]: { requests: 20, window: 60 }, // 20 per minute
-  [API_ENDPOINTS.MESSAGES.MEDIA]: { requests: 30, window: 60 }, // 30 per minute
-  
-  // Search endpoints
-  [API_ENDPOINTS.USERS.SEARCH]: { requests: 30, window: 60 }, // 30 per minute
-  
-  // Default rate limit
-  DEFAULT: { requests: 60, window: 60 }, // 60 per minute
-} as const;
 
 /**
  * Get rate limit for endpoint
@@ -318,35 +280,5 @@ export function getRateLimit(endpoint: string): { requests: number; window: numb
   return RATE_LIMITS[endpoint as keyof typeof RATE_LIMITS] || RATE_LIMITS.DEFAULT;
 }
 
-// ========== Development Helpers ==========
-
-/**
- * Get all endpoints as flat array (useful for testing)
- */
-export function getAllEndpoints(): string[] {
-  const endpoints: string[] = [];
-  
-  function extractEndpoints(obj: any, prefix = '') {
-    Object.entries(obj).forEach(([key, value]) => {
-      if (typeof value === 'string') {
-        endpoints.push(value);
-      } else if (typeof value === 'object' && value !== null) {
-        extractEndpoints(value, `${prefix}${key}.`);
-      }
-    });
-  }
-  
-  extractEndpoints(API_ENDPOINTS);
-  return endpoints;
-}
-
-/**
- * Validate endpoint exists
- */
-export function validateEndpoint(endpoint: string): boolean {
-  const allEndpoints = getAllEndpoints();
-  return allEndpoints.includes(endpoint);
-}
-
-// Export everything
+// Export default
 export default API_ENDPOINTS;

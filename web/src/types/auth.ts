@@ -1,216 +1,323 @@
-// src/types/auth.ts
-import type { User } from './user';
-
-// Auth status types
-export type MagicLinkStatus = 'pending' | 'used' | 'expired' | 'cancelled';
-export type DeviceType = 'web' | 'mobile' | 'desktop';
-
-// Magic Link entities
-export interface MagicLink {
+// src/types/auth.ts - Complete auth types matching your API
+export interface User {
   id: string;
+  username: string;
   email: string;
-  token: string;
-  userId?: string;
-  status: MagicLinkStatus;
-  expiresAt: string;
-  usedAt?: string;
-  ipAddress: string;
-  userAgent: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  bio?: string;
+  avatar?: string;
+  isOnline: boolean;
+  lastSeen?: string;
   createdAt: string;
   updatedAt: string;
 }
 
-// QR Code entities
-export interface QRCodeSession {
-  id: string;
-  qrCode: string;
-  secret: string;
-  userId?: string;
-  status: MagicLinkStatus;
-  expiresAt: string;
-  scannedAt?: string;
-  ipAddress: string;
-  userAgent: string;
-  createdAt: string;
-  updatedAt: string;
-}
+// ========== Magic Link Authentication ==========
 
-// User Session
-export interface UserSession {
-  id: string;
-  userId: string;
-  refreshToken: string;
-  deviceType: DeviceType;
-  deviceName: string;
-  ipAddress: string;
-  userAgent: string;
-  isActive: boolean;
-  lastUsedAt: string;
-  expiresAt: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Request types
 export interface MagicLinkRequest {
   email: string;
-  deviceType: DeviceType;
-  deviceName?: string;
+}
+
+export interface MagicLinkResponse {
+  message: string;
+  tokenExpiry: string;
+  emailSent: boolean;
 }
 
 export interface VerifyMagicLinkRequest {
   token: string;
 }
 
-export interface QRCodeRequest {
-  deviceType: DeviceType;
-  deviceName?: string;
-}
-
-export interface QRCodeScanRequest {
-  qrCode: string;
-}
-
-export interface RefreshTokenRequest {
-  refreshToken: string;
-}
-
 export interface MagicLinkUserRequest {
-  email: string;
-  firstName: string;
-  lastName: string;
   username: string;
-  phone?: string;
-  bio?: string;
-}
-
-// Legacy password requests (backward compatibility)
-export interface UserLoginRequest {
-  email: string;
-  password?: string;
-}
-
-export interface UserRegisterRequest {
-  username: string;
-  email: string;
-  password?: string;
   firstName: string;
   lastName: string;
   phone?: string;
   bio?: string;
 }
 
-// Response types
-export interface MagicLinkResponse {
-  message: string;
-  expiresAt: string;
-  email: string;
+// ========== QR Code Authentication ==========
+
+export interface QRCodeRequest {
+  deviceInfo: string;
+  platform: 'web' | 'mobile' | 'desktop';
 }
 
 export interface QRCodeResponse {
   qrCode: string;
   secret: string;
   expiresAt: string;
-}
-
-export interface AuthResponse {
-  user: User;
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
+  qrCodeDataUrl?: string; // Base64 encoded QR code image
 }
 
 export interface QRStatusResponse {
-  status: MagicLinkStatus;
-  user?: User;
+  status: 'pending' | 'scanned' | 'expired' | 'completed';
+  scannedBy?: string;
   scannedAt?: string;
+  expiresAt: string;
 }
 
-// Auth context types
-export interface AuthContextType {
+export interface QRScanRequest {
+  qrCode: string;
+}
+
+// ========== Session Management ==========
+
+export interface RefreshTokenRequest {
+  refreshToken: string;
+}
+
+export interface LogoutRequest {
+  refreshToken: string;
+}
+
+export interface TokenValidationResponse {
+  valid: boolean;
+  user?: User;
+  expiresAt?: string;
+}
+
+// ========== Legacy Password Authentication ==========
+
+export interface RegisterRequest {
+  username: string;
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  bio?: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+// ========== Common Response Types ==========
+
+export interface AuthResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: User;
+  expiresAt: string;
+  tokenType: 'Bearer';
+}
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt?: string;
+}
+
+// ========== Auth State Types ==========
+
+export interface AuthState {
   user: User | null;
-  accessToken: string | null;
-  refreshToken: string | null;
-  isLoading: boolean;
+  tokens: AuthTokens | null;
   isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
+  loginMethod: LoginMethod | null;
+}
+
+export type LoginMethod = 'magic_link' | 'qr_code' | 'password';
+
+export interface AuthContextType extends AuthState {
+  // Magic Link Authentication
+  sendMagicLink: (email: string) => Promise<MagicLinkResponse>;
+  verifyMagicLink: (token: string) => Promise<AuthResponse>;
+  registerWithMagicLink: (token: string, userData: MagicLinkUserRequest) => Promise<AuthResponse>;
   
-  // Magic link methods
-  sendMagicLink: (request: MagicLinkRequest) => Promise<MagicLinkResponse>;
-  verifyMagicLink: (request: VerifyMagicLinkRequest) => Promise<AuthResponse>;
-  registerWithMagicLink: (token: string, userRequest: MagicLinkUserRequest) => Promise<AuthResponse>;
-  
-  // QR code methods
-  generateQRCode: (request: QRCodeRequest) => Promise<QRCodeResponse>;
-  scanQRCode: (request: QRCodeScanRequest) => Promise<void>;
+  // QR Code Authentication
+  generateQRCode: (deviceInfo: string, platform: 'web' | 'mobile' | 'desktop') => Promise<QRCodeResponse>;
   checkQRStatus: (secret: string) => Promise<QRStatusResponse>;
   loginWithQRCode: (secret: string) => Promise<AuthResponse>;
+  scanQRCode: (qrCode: string) => Promise<void>;
   
-  // Session methods
-  refreshAccessToken: () => Promise<AuthResponse>;
+  // Session Management
+  refreshToken: () => Promise<void>;
   logout: () => Promise<void>;
   logoutAllDevices: () => Promise<void>;
+  validateToken: () => Promise<boolean>;
   
-  // Legacy methods (backward compatibility)
-  login: (request: UserLoginRequest) => Promise<AuthResponse>;
-  register: (request: UserRegisterRequest) => Promise<User>;
+  // Legacy Authentication
+  register: (userData: RegisterRequest) => Promise<AuthResponse>;
+  login: (credentials: LoginRequest) => Promise<AuthResponse>;
+  
+  // Utilities
+  clearError: () => void;
+  setUser: (user: User) => void;
 }
 
-// Auth store types (for Zustand)
-export interface AuthStore {
-  // State
-  user: User | null;
-  accessToken: string | null;
-  refreshToken: string | null;
+// ========== Magic Link Flow Types ==========
+
+export interface MagicLinkFlowState {
+  step: 'email' | 'checking' | 'register' | 'complete' | 'error';
+  email: string | null;
+  token: string | null;
+  error: string | null;
   isLoading: boolean;
-  isAuthenticated: boolean;
-  
-  // Actions
-  setAuth: (auth: Partial<AuthResponse>) => void;
-  setUser: (user: User | null) => void;
-  setTokens: (accessToken: string | null, refreshToken: string | null) => void;
-  setLoading: (loading: boolean) => void;
-  clearAuth: () => void;
-  
-  // Persistence
-  initializeAuth: () => void;
-  persistAuth: (auth: AuthResponse) => void;
+  requiresRegistration: boolean;
 }
 
-// Token payload (JWT)
-export interface TokenPayload {
-  user_id: string;
-  email: string;
-  exp: number;
-  iat: number;
+// ========== QR Code Flow Types ==========
+
+export interface QRCodeFlowState {
+  step: 'generate' | 'display' | 'waiting' | 'scanned' | 'complete' | 'expired' | 'error';
+  qrCode: string | null;
+  secret: string | null;
+  status: QRStatusResponse['status'];
+  error: string | null;
+  isLoading: boolean;
+  expiresAt: string | null;
 }
 
-// Auth guard types
-export interface AuthGuardProps {
-  children: React.ReactNode;
-  fallback?: React.ReactNode;
-  requireAuth?: boolean;
+// ========== Device Information ==========
+
+export interface DeviceInfo {
+  type: 'web' | 'mobile' | 'desktop';
+  name: string;
+  os?: string;
+  browser?: string;
+  userAgent: string;
 }
 
-// Auth error types
+export interface SessionInfo {
+  id: string;
+  deviceInfo: DeviceInfo;
+  ipAddress: string;
+  lastActivity: string;
+  isCurrentSession: boolean;
+  createdAt: string;
+}
+
+// ========== Auth Error Types ==========
+
 export interface AuthError {
   code: string;
   message: string;
   details?: Record<string, any>;
 }
 
-// Common auth error codes
-export const AUTH_ERROR_CODES = {
-  INVALID_TOKEN: 'INVALID_TOKEN',
-  TOKEN_EXPIRED: 'TOKEN_EXPIRED',
-  USER_NOT_FOUND: 'USER_NOT_FOUND',
-  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
-  MAGIC_LINK_EXPIRED: 'MAGIC_LINK_EXPIRED',
-  MAGIC_LINK_USED: 'MAGIC_LINK_USED',
-  QR_CODE_EXPIRED: 'QR_CODE_EXPIRED',
-  QR_CODE_USED: 'QR_CODE_USED',
-  REGISTRATION_REQUIRED: 'REGISTRATION_REQUIRED',
-  UNAUTHORIZED: 'UNAUTHORIZED',
-  FORBIDDEN: 'FORBIDDEN',
-} as const;
+export type AuthErrorCode = 
+  | 'INVALID_CREDENTIALS'
+  | 'USER_NOT_FOUND'
+  | 'EMAIL_ALREADY_EXISTS'
+  | 'USERNAME_TAKEN'
+  | 'INVALID_TOKEN'
+  | 'TOKEN_EXPIRED'
+  | 'QR_CODE_EXPIRED'
+  | 'QR_CODE_INVALID'
+  | 'MAGIC_LINK_EXPIRED'
+  | 'MAGIC_LINK_INVALID'
+  | 'SESSION_EXPIRED'
+  | 'RATE_LIMITED'
+  | 'VALIDATION_ERROR'
+  | 'SERVER_ERROR'
+  | 'NETWORK_ERROR';
 
-export type AuthErrorCode = typeof AUTH_ERROR_CODES[keyof typeof AUTH_ERROR_CODES];
+// ========== Auth Hook Types ==========
+
+export interface UseAuthOptions {
+  redirectTo?: string;
+  redirectIfFound?: boolean;
+  validateOnMount?: boolean;
+  autoRefresh?: boolean;
+}
+
+export interface UseMagicLinkOptions {
+  onSuccess?: (response: AuthResponse) => void;
+  onError?: (error: AuthError) => void;
+  autoRedirect?: boolean;
+}
+
+export interface UseQRCodeOptions {
+  pollInterval?: number; // milliseconds
+  maxPolls?: number;
+  onSuccess?: (response: AuthResponse) => void;
+  onError?: (error: AuthError) => void;
+  onStatusChange?: (status: QRStatusResponse['status']) => void;
+}
+
+// ========== Form Validation Types ==========
+
+export interface LoginFormData {
+  email: string;
+  password: string;
+  rememberMe?: boolean;
+}
+
+export interface RegisterFormData {
+  username: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  bio?: string;
+  agreeToTerms: boolean;
+}
+
+export interface MagicLinkFormData {
+  email: string;
+}
+
+export interface MagicLinkRegisterFormData {
+  username: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  bio?: string;
+}
+
+// ========== Auth Event Types ==========
+
+export type AuthEventType = 
+  | 'login'
+  | 'logout'
+  | 'register'
+  | 'token_refresh'
+  | 'session_expired'
+  | 'magic_link_sent'
+  | 'magic_link_verified'
+  | 'qr_code_generated'
+  | 'qr_code_scanned'
+  | 'user_updated';
+
+export interface AuthEvent {
+  type: AuthEventType;
+  user?: User;
+  timestamp: string;
+  metadata?: Record<string, any>;
+}
+
+// ========== Storage Types ==========
+
+export interface StoredTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt?: string;
+  issuedAt?: string;
+}
+
+export interface StoredUserSession {
+  user: User;
+  tokens: StoredTokens;
+  loginMethod: LoginMethod;
+  lastActivity: string;
+}
+
+// ========== API Response Wrappers ==========
+
+export interface AuthApiResponse<T = any> {
+  success: boolean;
+  message: string;
+  data?: T;
+  error?: string;
+  requiresRegistration?: boolean;
+  token?: string; // For magic link registration flow
+}
