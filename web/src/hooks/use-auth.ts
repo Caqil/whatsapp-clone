@@ -1,4 +1,4 @@
-// src/hooks/use-auth.ts - Complete auth hook supporting all authentication methods
+// src/hooks/use-auth.ts - Fixed version
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -64,13 +64,17 @@ export function useAuth(): AuthContextType {
 
   // Helper function to set authenticated state
   const setAuthenticatedState = useCallback((authResponse: AuthResponse, method: LoginMethod) => {
+    console.log('🔧 Setting authenticated state:', authResponse);
+    
     const tokens: AuthTokens = {
       accessToken: authResponse.accessToken,
       refreshToken: authResponse.refreshToken,
-      expiresAt: authResponse.expiresAt,
+      expiresAt: authResponse.expiresAt.toString(),
     };
 
-    setStoredTokens(tokens.accessToken, tokens.refreshToken);
+    console.log('💾 Storing tokens:', tokens);
+    // FIXED: Pass expiresAt to storage function
+    setStoredTokens(tokens.accessToken, tokens.refreshToken, tokens.expiresAt);
     
     updateState({
       user: authResponse.user,
@@ -82,9 +86,10 @@ export function useAuth(): AuthContextType {
     });
 
     // Schedule token refresh
-    scheduleTokenRefresh(authResponse.expiresAt);
+    scheduleTokenRefresh(authResponse.expiresAt.toString());
     
     console.log(`✅ Authentication successful via ${method}:`, authResponse.user.username);
+    console.log('🔒 Auth state updated:', { isAuthenticated: true, user: authResponse.user });
   }, [updateState]);
 
   // Schedule automatic token refresh
@@ -93,9 +98,17 @@ export function useAuth(): AuthContextType {
       clearTimeout(refreshTimeoutRef.current);
     }
 
-    const expiryTime = new Date(expiresAt).getTime();
+    const expiryTime = new Date(parseInt(expiresAt) * 1000).getTime(); // Convert Unix timestamp to milliseconds
     const currentTime = Date.now();
     const timeUntilRefresh = expiryTime - currentTime - (5 * 60 * 1000); // 5 minutes before expiry
+
+    console.log('⏰ Token refresh scheduled:', {
+      expiresAt,
+      expiryTime: new Date(expiryTime),
+      currentTime: new Date(currentTime),
+      timeUntilRefresh,
+      minutesUntilRefresh: Math.round(timeUntilRefresh / 1000 / 60)
+    });
 
     if (timeUntilRefresh > 0) {
       refreshTimeoutRef.current = setTimeout(() => {
@@ -140,7 +153,12 @@ export function useAuth(): AuthContextType {
     try {
       updateState({ isLoading: true, error: null });
       
-      const response = await authApi.sendMagicLink({ email });
+      // FIXED: Add required deviceType and deviceName fields
+      const response = await authApi.sendMagicLink({ 
+        email,
+        deviceType: 'web',
+        deviceName: 'Web Browser'
+      });
       
       updateState({ isLoading: false });
       toast.success('Magic link sent to your email!');
@@ -158,18 +176,25 @@ export function useAuth(): AuthContextType {
     try {
       updateState({ isLoading: true, error: null });
       
+      console.log('🔍 Verifying magic link token:', token);
+      
       const response = await authApi.verifyMagicLink({ token });
+      
+      console.log('✅ Magic link verification successful:', response);
       
       setAuthenticatedState(response, 'magic_link');
       toast.success('Successfully logged in!');
       
       return response;
     } catch (error: any) {
+      console.error('❌ Magic link verification failed:', error);
+      
       const errorMessage = error.response?.data?.message || 'Invalid or expired magic link';
       updateState({ isLoading: false, error: errorMessage });
       
       // Check if user registration is required
       if (error.response?.status === 412 && error.response?.data?.data?.requiresRegistration) {
+        console.log('📝 Registration required');
         toast.info('Please complete your registration');
         throw { ...error, requiresRegistration: true, token: error.response.data.data.token };
       }
@@ -183,13 +208,19 @@ export function useAuth(): AuthContextType {
     try {
       updateState({ isLoading: true, error: null });
       
+      console.log('📝 Registering with magic link:', userData);
+      
       const response = await authApi.registerWithMagicLink(token, userData);
+      
+      console.log('✅ Registration successful:', response);
       
       setAuthenticatedState(response, 'magic_link');
       toast.success(`Welcome ${userData.firstName}! Your account has been created.`);
       
       return response;
     } catch (error: any) {
+      console.error('❌ Registration failed:', error);
+      
       const errorMessage = error.response?.data?.message || 'Registration failed';
       updateState({ isLoading: false, error: errorMessage });
       toast.error(errorMessage);
@@ -203,7 +234,11 @@ export function useAuth(): AuthContextType {
     try {
       updateState({ isLoading: true, error: null });
       
-      const response = await authApi.generateQRCode({ deviceInfo, platform });
+      // FIXED: Send correct field names
+      const response = await authApi.generateQRCode({ 
+        deviceType: platform, 
+        deviceName: deviceInfo 
+      });
       
       updateState({ isLoading: false });
       
@@ -247,7 +282,7 @@ export function useAuth(): AuthContextType {
   const scanQRCode = useCallback(async (qrCode: string): Promise<void> => {
     try {
       await authApi.scanQRCode(qrCode);
-      toast.success('QR code scanned successfully!');
+      toast.success('QR code scanned successfully');
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || 'Failed to scan QR code';
       toast.error(errorMessage);
@@ -258,50 +293,31 @@ export function useAuth(): AuthContextType {
   // ========== Session Management ==========
 
   const refreshToken = useCallback(async (): Promise<void> => {
-    if (isRefreshingRef.current) {
-      console.log('🔄 Token refresh already in progress');
-      return;
-    }
-
+    if (isRefreshingRef.current) return;
+    
     const tokens = getStoredTokens();
     if (!tokens?.refreshToken) {
-      console.log('❌ No refresh token available');
       clearAuthState();
       return;
     }
 
     try {
       isRefreshingRef.current = true;
-      console.log('🔄 Refreshing access token...');
       
       const response = await authApi.refreshToken({ refreshToken: tokens.refreshToken });
       
-      const newTokens: AuthTokens = {
-        accessToken: response.accessToken,
-        refreshToken: response.refreshToken,
-        expiresAt: response.expiresAt,
-      };
-
-      setStoredTokens(newTokens.accessToken, newTokens.refreshToken);
-      updateState({
-        user: response.user,
-        tokens: newTokens,
-        isAuthenticated: true,
-      });
-
-      // Schedule next refresh
-      scheduleTokenRefresh(response.expiresAt);
+      setAuthenticatedState(response, state.loginMethod || 'magic_link');
       
-      console.log('✅ Token refreshed successfully');
+      console.log('🔄 Token refreshed successfully');
     } catch (error: any) {
       console.error('❌ Token refresh failed:', error);
       clearAuthState();
-      toast.error('Session expired. Please login again.');
-      router.push('/auth');
+      toast.error('Session expired. Please log in again.');
+      router.push('/login');
     } finally {
       isRefreshingRef.current = false;
     }
-  }, [updateState, clearAuthState, scheduleTokenRefresh, router]);
+  }, [clearAuthState, setAuthenticatedState, state.loginMethod, router]);
 
   const logout = useCallback(async (): Promise<void> => {
     try {
@@ -311,33 +327,31 @@ export function useAuth(): AuthContextType {
       }
     } catch (error) {
       console.error('Logout API call failed:', error);
-      // Continue with local logout even if API call fails
+    } finally {
+      clearAuthState();
+      toast.success('Logged out successfully');
     }
-
-    clearAuthState();
-    toast.success('Logged out successfully');
-    router.push('/auth');
-  }, [clearAuthState, router]);
+  }, [clearAuthState]);
 
   const logoutAllDevices = useCallback(async (): Promise<void> => {
     try {
       await authApi.logoutAllDevices();
       clearAuthState();
       toast.success('Logged out from all devices');
-      router.push('/auth');
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || 'Failed to logout from all devices';
       toast.error(errorMessage);
       throw error;
     }
-  }, [clearAuthState, router]);
+  }, [clearAuthState]);
 
   const validateToken = useCallback(async (): Promise<boolean> => {
     try {
-      const response = await authApi.validateToken();
-      if (response.valid && response.user) {
+      const result = await authApi.validateToken();
+      
+      if (result.valid && result.user) {
         updateState({
-          user: response.user,
+          user: result.user,
           isAuthenticated: true,
           isLoading: false,
         });
@@ -362,7 +376,7 @@ export function useAuth(): AuthContextType {
       const response = await authApi.register(userData);
       
       setAuthenticatedState(response, 'password');
-      toast.success(`Welcome ${userData.firstName}! Your account has been created.`);
+      toast.success('Registration successful!');
       
       return response;
     } catch (error: any) {
@@ -380,7 +394,7 @@ export function useAuth(): AuthContextType {
       const response = await authApi.login(credentials);
       
       setAuthenticatedState(response, 'password');
-      toast.success('Successfully logged in!');
+      toast.success('Login successful!');
       
       return response;
     } catch (error: any) {

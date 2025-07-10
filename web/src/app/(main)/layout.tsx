@@ -112,7 +112,7 @@ export default function MainLayout({
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
       <Header
-        user={user}
+        user={user || undefined}
         unreadCount={totalUnreadCount}
         onToggleSidebar={() => {
           if (isMobile) {

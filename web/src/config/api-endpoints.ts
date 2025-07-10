@@ -98,9 +98,9 @@ export function buildApiUrl(endpoint: string, baseUrl?: string): string {
  * Build WebSocket URL
  */
 export function buildWebSocketUrl(token?: string, baseUrl?: string): string {
-  const base = baseUrl || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  const base = baseUrl || process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:8080';
   const wsBase = base.replace('http://', 'ws://').replace('https://', 'wss://');
-  const wsUrl = `${wsBase}/api/ws`;
+  const wsUrl = `${wsBase}`;
   
   if (token) {
     return `${wsUrl}?token=${encodeURIComponent(token)}`;

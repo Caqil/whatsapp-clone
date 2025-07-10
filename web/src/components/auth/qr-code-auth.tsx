@@ -105,7 +105,7 @@ export function QRCodeAuth() {
           case "scanned":
             updateState({ step: "scanned" });
             break;
-          case "completed":
+          case "used":
             stopPolling();
             await handleLogin(secret);
             break;

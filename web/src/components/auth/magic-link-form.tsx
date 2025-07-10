@@ -44,6 +44,7 @@ export function MagicLinkAuth() {
   useEffect(() => {
     const token = searchParams.get("token");
     if (token) {
+      console.log("🔗 Magic link token found in URL:", token);
       setState((prev) => ({ ...prev, step: "checking", token }));
       handleVerifyToken(token);
     }
@@ -64,6 +65,8 @@ export function MagicLinkAuth() {
     try {
       updateState({ isLoading: true, error: null });
 
+      console.log("📧 Sending magic link to:", state.email.trim());
+
       await sendMagicLink(state.email.trim());
 
       updateState({
@@ -73,6 +76,8 @@ export function MagicLinkAuth() {
 
       toast.success("Magic link sent! Check your email.");
     } catch (error: any) {
+      console.error("❌ Failed to send magic link:", error);
+
       const errorMessage =
         error.response?.data?.message || "Failed to send magic link";
       updateState({
@@ -87,7 +92,11 @@ export function MagicLinkAuth() {
     try {
       updateState({ isLoading: true, error: null });
 
+      console.log("🔍 Verifying magic link token:", token);
+
       const response = await verifyMagicLink(token);
+
+      console.log("✅ Magic link verification successful:", response);
 
       updateState({
         step: "complete",
@@ -95,9 +104,17 @@ export function MagicLinkAuth() {
       });
 
       toast.success("Successfully logged in!");
-      router.push("/chat");
+
+      // Wait longer to ensure auth state is fully set
+      setTimeout(() => {
+        console.log("🚀 Redirecting to chat...");
+        router.push("/chat");
+      }, 2000);
     } catch (error: any) {
+      console.error("❌ Magic link verification failed:", error);
+
       if (error.requiresRegistration) {
+        console.log("📝 Registration required");
         updateState({
           step: "register",
           token: error.token,
@@ -135,6 +152,8 @@ export function MagicLinkAuth() {
     try {
       updateState({ isLoading: true, error: null });
 
+      console.log("📝 Registering with magic link:", registrationData);
+
       await registerWithMagicLink(state.token, {
         username: registrationData.username.trim(),
         firstName: registrationData.firstName.trim(),
@@ -149,8 +168,15 @@ export function MagicLinkAuth() {
       });
 
       toast.success("Account created successfully!");
-      router.push("/chat");
+
+      // Add a delay to show the success message, then redirect
+      setTimeout(() => {
+        console.log("🚀 Redirecting to chat...");
+        router.push("/chat");
+      }, 1500);
     } catch (error: any) {
+      console.error("❌ Registration failed:", error);
+
       const errorMessage =
         error.response?.data?.message || "Registration failed";
       updateState({
@@ -161,6 +187,8 @@ export function MagicLinkAuth() {
   };
 
   const handleRetry = () => {
+    console.log("🔄 Retrying magic link auth");
+
     clearError();
     updateState({
       step: "email",
@@ -318,13 +346,13 @@ export function MagicLinkAuth() {
             htmlFor="phone"
             className="block text-sm font-medium text-gray-700"
           >
-            Phone Number
+            Phone (optional)
           </label>
           <input
             id="phone"
             type="tel"
             className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            placeholder="+1234567890"
+            placeholder="+1 (555) 123-4567"
             value={registrationData.phone}
             onChange={(e) =>
               setRegistrationData((prev) => ({
@@ -341,7 +369,7 @@ export function MagicLinkAuth() {
             htmlFor="bio"
             className="block text-sm font-medium text-gray-700"
           >
-            Bio
+            Bio (optional)
           </label>
           <textarea
             id="bio"
@@ -350,7 +378,10 @@ export function MagicLinkAuth() {
             placeholder="Tell us about yourself..."
             value={registrationData.bio}
             onChange={(e) =>
-              setRegistrationData((prev) => ({ ...prev, bio: e.target.value }))
+              setRegistrationData((prev) => ({
+                ...prev,
+                bio: e.target.value,
+              }))
             }
             disabled={state.isLoading}
           />
@@ -378,7 +409,13 @@ export function MagicLinkAuth() {
     <div className="w-full max-w-md mx-auto text-center space-y-6">
       <CheckCircle className="mx-auto h-12 w-12 text-green-600" />
       <h2 className="text-2xl font-bold text-gray-900">Welcome!</h2>
-      <p className="text-gray-600">You have been successfully authenticated</p>
+      <p className="text-gray-600">
+        You have been successfully authenticated. Redirecting to chat...
+      </p>
+      <div className="flex items-center justify-center space-x-2">
+        <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+        <span className="text-sm text-gray-600">Redirecting...</span>
+      </div>
     </div>
   );
 
@@ -399,14 +436,12 @@ export function MagicLinkAuth() {
   );
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md">
-        {state.step === "email" && renderEmailStep()}
-        {state.step === "checking" && renderCheckingStep()}
-        {state.step === "register" && renderRegistrationStep()}
-        {state.step === "complete" && renderCompleteStep()}
-        {state.step === "error" && renderErrorStep()}
-      </div>
+    <div className="w-full">
+      {state.step === "email" && renderEmailStep()}
+      {state.step === "checking" && renderCheckingStep()}
+      {state.step === "register" && renderRegistrationStep()}
+      {state.step === "complete" && renderCompleteStep()}
+      {state.step === "error" && renderErrorStep()}
     </div>
   );
 }

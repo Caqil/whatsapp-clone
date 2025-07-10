@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Mail, QrCode, Lock } from "lucide-react";
 import { MagicLinkAuth } from "./magic-link-form";
 import { QRCodeAuth } from "./qr-code-auth";
@@ -121,7 +122,17 @@ function PasswordAuth() {
 }
 
 export function AuthTabs() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<AuthMethod>("magic_link");
+
+  // Check if there's a token in URL - if so, force magic link tab and don't allow changing
+  useEffect(() => {
+    const token = searchParams.get("token");
+    if (token) {
+      console.log("🔗 Magic link token detected, forcing magic_link tab");
+      setActiveTab("magic_link");
+    }
+  }, [searchParams]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -139,34 +150,51 @@ export function AuthTabs() {
 
       {/* Tabs */}
       <div className="max-w-md mx-auto px-4 py-6">
-        <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg mb-8">
-          {authTabs.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === tab.id
-                    ? "bg-white text-blue-600 shadow-sm"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className="hidden sm:inline">{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        {/* Only show tabs if there's no token (don't show tabs during magic link verification) */}
+        {!searchParams.get("token") && (
+          <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg mb-8">
+            {authTabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                    activeTab === tab.id
+                      ? "bg-white text-blue-600 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="hidden sm:inline">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Tab Content */}
         <div className="space-y-6">
-          {/* Tab Description */}
-          <div className="text-center">
-            <p className="text-sm text-gray-600">
-              {authTabs.find((tab) => tab.id === activeTab)?.description}
-            </p>
-          </div>
+          {/* Tab Description - only show if no token */}
+          {!searchParams.get("token") && (
+            <div className="text-center">
+              <p className="text-sm text-gray-600">
+                {authTabs.find((tab) => tab.id === activeTab)?.description}
+              </p>
+            </div>
+          )}
+
+          {/* Show magic link processing message when token is present */}
+          {searchParams.get("token") && (
+            <div className="text-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                Processing Magic Link
+              </h2>
+              <p className="text-sm text-gray-600">
+                Please wait while we verify your authentication link...
+              </p>
+            </div>
+          )}
 
           {/* Auth Components */}
           {activeTab === "magic_link" && <MagicLinkAuth />}

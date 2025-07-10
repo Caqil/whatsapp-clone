@@ -102,30 +102,48 @@ class StorageManager {
   /**
    * Get stored authentication tokens
    */
-  getTokens(): { accessToken: string | null; refreshToken: string | null; expiresAt: string | null } {
-    return {
-      accessToken: this.getItem(STORAGE_KEYS.ACCESS_TOKEN),
-      refreshToken: this.getItem(STORAGE_KEYS.REFRESH_TOKEN),
-      expiresAt: this.getItem(STORAGE_KEYS.TOKEN_EXPIRES_AT),
-    };
+getTokens(): { accessToken: string | null; refreshToken: string | null; expiresAt: string | null } {
+  return {
+    accessToken: this.getItem(STORAGE_KEYS.ACCESS_TOKEN),
+    refreshToken: this.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+    expiresAt: this.getItem(STORAGE_KEYS.TOKEN_EXPIRES_AT),
+  };
+}
+/**
+ * Set authentication tokens - FIXED to include expiresAt
+ */
+setTokens(accessToken: string, refreshToken: string, expiresAt?: string): boolean {
+  const now = new Date().toISOString();
+  
+  const accessSet = this.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken);
+  const refreshSet = this.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
+  const issuedSet = this.setItem(STORAGE_KEYS.TOKEN_ISSUED_AT, now);
+  
+  let expiresSet = true;
+  if (expiresAt) {
+    expiresSet = this.setItem(STORAGE_KEYS.TOKEN_EXPIRES_AT, expiresAt);
   }
-
-  /**
-   * Set authentication tokens
-   */
-  setTokens(accessToken: string, refreshToken: string): boolean {
-    const accessSet = this.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken);
-    const refreshSet = this.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
-    return accessSet && refreshSet;
-  }
-
-  /**
-   * Remove authentication tokens
-   */
-  removeTokens(): void {
-    this.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
-    this.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-  }
+  
+  console.log('💾 Storing tokens:', {
+    accessToken: accessToken ? '✅' : '❌',
+    refreshToken: refreshToken ? '✅' : '❌',
+    expiresAt: expiresAt || 'not provided',
+    issuedAt: now,
+    success: accessSet && refreshSet && expiresSet && issuedSet
+  });
+  
+  return accessSet && refreshSet && expiresSet && issuedSet;
+}
+/**
+ * Remove authentication tokens
+ */
+removeTokens(): void {
+  console.log('🗑️ Removing stored tokens');
+  this.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
+  this.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+  this.removeItem(STORAGE_KEYS.TOKEN_EXPIRES_AT);
+  this.removeItem(STORAGE_KEYS.TOKEN_ISSUED_AT);
+}
 
   /**
    * Get stored user data
@@ -512,11 +530,9 @@ class StorageManager {
 const storageManager = new StorageManager();
 
 // ========== Exported Functions ==========
-
-// Authentication
 export const getStoredTokens = () => storageManager.getTokens();
-export const setStoredTokens = (accessToken: string, refreshToken: string) => 
-  storageManager.setTokens(accessToken, refreshToken);
+export const setStoredTokens = (accessToken: string, refreshToken: string, expiresAt?: string) => 
+  storageManager.setTokens(accessToken, refreshToken, expiresAt);
 export const removeStoredTokens = () => storageManager.removeTokens();
 
 export const getStoredUser = () => storageManager.getUserData();
@@ -557,17 +573,16 @@ export const getSidebarCollapsed = () => storageManager.getSidebarCollapsed();
 export const setSidebarCollapsed = (collapsed: boolean) => storageManager.setSidebarCollapsed(collapsed);
 
 export const getRecentEmojis = () => storageManager.getRecentEmojis();
-export const addRecentEmoji = (emoji: string) => storageManager.addRecentEmoji(emoji);
+export const setRecentEmojis = (emojis: string[]) => storageManager.setRecentEmojis(emojis);
+export const addRecentEmoji = (emoji: string, maxCount?: number) => storageManager.addRecentEmoji(emoji, maxCount);
 
 export const getSearchHistory = () => storageManager.getSearchHistory();
-export const addSearchQuery = (query: string) => storageManager.addSearchQuery(query);
-export const clearSearchHistory = () => storageManager.clearSearchHistory();
+export const setSearchHistory = (history: string[]) => storageManager.setSearchHistory(history);
+export const addSearchQuery = (query: string, maxCount?: number) => storageManager.addSearchQuery(query, maxCount);
 
-// Cache management
-export const getCacheSize = () => storageManager.getCacheSize();
-export const clearAllData = () => storageManager.clearAllData();
-export const clearExpiredData = () => storageManager.clearExpiredData();
+// Utilities
+export const clearAllStoredData = () => storageManager.clearAllData();
 export const getStorageStats = () => storageManager.getStorageStats();
 
-// Export storage manager for advanced usage
+// Default export
 export default storageManager;
