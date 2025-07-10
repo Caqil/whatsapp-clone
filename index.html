@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Clone - Working Version</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'wa-dark': '#111b21',
+                        'wa-dark-2': '#202c33',
+                        'wa-dark-3': '#2a3942',
+                        'wa-green': '#25d366',
+                        'wa-own': '#005c4b',
+                        'wa-gray': '#8696a0'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes typing {
+            0%, 60%, 100% { opacity: 1; }
+            30% { opacity: 0.5; }
+        }
+        .typing-animation {
+            animation: typing 1.5s infinite;
+        }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-wa-dark text-white font-sans h-screen overflow-hidden">
+    
+    <!-- Login Screen -->
+    <div id="loginScreen" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-600 to-purple-700">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md text-gray-800">
+            <div class="text-center mb-8">
+                <div class="text-5xl mb-4">💬</div>
+                <h1 class="text-3xl font-bold text-wa-green mb-2">WhatsApp Clone</h1>
+                <p class="text-gray-600">Connect instantly with friends</p>
+            </div>
+            
+            <div id="loginForm">
+                <div class="space-y-4">
+                    <input type="email" id="loginEmail" placeholder="Email" 
+                           class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-wa-green outline-none transition-all">
+                    <input type="password" id="loginPassword" placeholder="Password" 
+                           class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-wa-green outline-none transition-all">
+                </div>
+                <div class="mt-6 space-y-3">
+                    <button onclick="login()" class="w-full bg-wa-green hover:bg-green-600 text-white py-3 rounded-xl font-semibold transition-colors">
+                        Login
+                    </button>
+                    <button onclick="showRegister()" class="w-full bg-gray-500 hover:bg-gray-600 text-white py-3 rounded-xl font-semibold transition-colors">
+                        Create Account
+                    </button>
+                </div>
+            </div>
+            
+            <div id="registerForm" class="hidden">
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-3">
+                        <input type="text" id="firstName" placeholder="First Name" 
+                               class="px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-wa-green outline-none transition-all">
+                        <input type="text" id="lastName" placeholder="Last Name" 
+                               class="px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-wa-green outline-none transition-all">
+                    </div>
+                    <input type="text" id="username" placeholder="Username" 
+                           class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-wa-green outline-none transition-all">
+                    <input type="email" id="regEmail" placeholder="Email" 
+                           class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-wa-green outline-none transition-all">
+                    <input type="password" id="regPassword" placeholder="Password" 
+                           class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-wa-green outline-none transition-all">
+                </div>
+                <div class="mt-6 space-y-3">
+                    <button onclick="register()" class="w-full bg-wa-green hover:bg-green-600 text-white py-3 rounded-xl font-semibold transition-colors">
+                        Create Account
+                    </button>
+                    <button onclick="showLogin()" class="w-full bg-gray-500 hover:bg-gray-600 text-white py-3 rounded-xl font-semibold transition-colors">
+                        Back to Login
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="mainApp" class="hidden h-screen flex flex-col">
+        <!-- Top Bar -->
+        <div class="bg-wa-dark-2 px-6 py-4 border-b border-gray-600">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="w-12 h-12 bg-wa-green rounded-full flex items-center justify-center text-white font-bold text-lg">
+                        <span id="userInitial">U</span>
+                    </div>
+                    <div>
+                        <div class="font-semibold" id="userName">User</div>
+                        <div class="text-sm text-wa-gray">Online</div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button onclick="createNewChat()" class="bg-wa-green hover:bg-green-600 px-4 py-2 rounded-lg transition-colors">
+                        New Chat
+                    </button>
+                    <button onclick="logout()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition-colors">
+                        Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-1 overflow-hidden">
+            <!-- Sidebar -->
+            <div class="w-1/3 bg-wa-dark border-r border-gray-600 flex flex-col">
+                <div class="p-4 border-b border-gray-600">
+                    <input type="text" placeholder="Search chats..." 
+                           class="w-full bg-wa-dark-3 px-4 py-2 rounded-lg text-white placeholder-wa-gray outline-none">
+                </div>
+                
+                <div class="flex-1 overflow-y-auto scrollbar-hide" id="chatsList">
+                    <div class="p-8 text-center text-wa-gray">
+                        <div class="text-4xl mb-4">💬</div>
+                        <p>No chats yet</p>
+                        <button onclick="createNewChat()" class="mt-4 text-wa-green hover:underline">Start a conversation</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="flex-1 flex flex-col">
+                <!-- Chat Header -->
+                <div id="chatHeader" class="hidden bg-wa-dark-2 px-6 py-4 border-b border-gray-600">
+                    <div class="flex items-center space-x-4">
+                        <div class="w-10 h-10 bg-wa-green rounded-full flex items-center justify-center text-white font-bold">
+                            <span id="chatInitial">C</span>
+                        </div>
+                        <div>
+                            <div class="font-semibold" id="chatName">Chat</div>
+                            <div class="text-sm text-wa-gray">Online</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Messages -->
+                <div class="flex-1 overflow-y-auto scrollbar-hide p-4 space-y-4" id="messagesArea">
+                    <div class="flex items-center justify-center h-full">
+                        <div class="text-center text-wa-gray">
+                            <div class="text-6xl mb-4">💬</div>
+                            <h2 class="text-2xl font-semibold mb-2">Select a chat</h2>
+                            <p>Choose a conversation to start messaging</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Typing Indicator -->
+                <div id="typingIndicator" class="hidden px-6 py-2 text-wa-gray text-sm italic">
+                    <span id="typingUserName">Someone</span> is typing<span class="typing-animation">...</span>
+                </div>
+
+                <!-- Message Input -->
+                <div id="messageInputArea" class="hidden bg-wa-dark-2 p-4">
+                    <div class="flex items-center space-x-4">
+                        <label for="fileInput" class="cursor-pointer p-3 bg-wa-green hover:bg-green-600 rounded-full transition-colors">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+                            </svg>
+                            <input type="file" id="fileInput" class="hidden" onchange="handleFileUpload(this.files[0])">
+                        </label>
+                        
+                        <div class="flex-1">
+                            <textarea id="messageInput" 
+                                      placeholder="Type a message..." 
+                                      rows="1"
+                                      class="w-full bg-wa-dark-3 text-white px-4 py-3 rounded-2xl resize-none outline-none placeholder-wa-gray max-h-32"
+                                      onkeydown="handleMessageKeyDown(event)"
+                                      oninput="handleMessageInput()"
+                                      onblur="stopTyping()"></textarea>
+                        </div>
+                        
+                        <button onclick="sendMessage()" class="p-3 bg-wa-green hover:bg-green-600 rounded-full transition-colors">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Chat Modal -->
+    <div id="newChatModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-wa-dark-2 rounded-2xl p-6 w-full max-w-md mx-4">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-xl font-semibold">New Chat</h3>
+                <button onclick="closeNewChatModal()" class="text-wa-gray hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <input type="text" id="userSearchInput" placeholder="Search users..." 
+                       class="w-full bg-wa-dark-3 px-4 py-3 rounded-lg text-white placeholder-wa-gray outline-none"
+                       oninput="searchUsers(this.value)">
+                
+                <div id="userSearchResults" class="max-h-60 overflow-y-auto space-y-2">
+                    <!-- Search results will appear here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" class="hidden fixed top-4 right-4 bg-wa-green text-white px-6 py-3 rounded-lg shadow-lg z-50 transform translate-x-full transition-transform duration-300">
+        <span id="notificationText"></span>
+    </div>
+
+    <script>
+        // Global state
+        const API_BASE = 'http://localhost:8080/api';
+        let currentUser = null;
+        let currentChat = null;
+        let socket = null;
+        let token = localStorage.getItem('token');
+        let chats = [];
+        let messages = [];
+        let allUsers = [];
+        let isTyping = false;
+        let typingTimer = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 App initializing...');
+            if (token) {
+                console.log('✅ Token found, loading app');
+                loadApp();
+            } else {
+                console.log('❌ No token, showing login');
+                showLogin();
+            }
+        });
+
+        // Authentication
+        function showLogin() {
+            document.getElementById('loginScreen').classList.remove('hidden');
+            document.getElementById('mainApp').classList.add('hidden');
+            document.getElementById('loginForm').classList.remove('hidden');
+            document.getElementById('registerForm').classList.add('hidden');
+        }
+
+        function showRegister() {
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('registerForm').classList.remove('hidden');
+        }
+
+        async function login() {
+            const email = document.getElementById('loginEmail').value.trim();
+            const password = document.getElementById('loginPassword').value;
+
+            if (!email || !password) {
+                showNotification('Please fill in all fields', 'error');
+                return;
+            }
+
+            console.log('🔐 Attempting login...');
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+                console.log('🔐 Login response:', data);
+
+                if (data.success) {
+                    token = data.data.token;
+                    currentUser = data.data.user;
+                    localStorage.setItem('token', token);
+                    console.log('✅ Login successful, loading app');
+                    await loadApp();
+                } else {
+                    showNotification('Login failed: ' + data.message, 'error');
+                }
+            } catch (error) {
+                console.error('❌ Login error:', error);
+                showNotification('Login error: ' + error.message, 'error');
+            }
+        }
+
+        async function register() {
+            const firstName = document.getElementById('firstName').value.trim();
+            const lastName = document.getElementById('lastName').value.trim();
+            const username = document.getElementById('username').value.trim();
+            const email = document.getElementById('regEmail').value.trim();
+            const password = document.getElementById('regPassword').value;
+
+            if (!firstName || !lastName || !username || !email || !password) {
+                showNotification('Please fill in all fields', 'error');
+                return;
+            }
+
+            console.log('📝 Attempting registration...');
+            try {
+                const response = await fetch(`${API_BASE}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ firstName, lastName, username, email, password })
+                });
+
+                const data = await response.json();
+                console.log('📝 Register response:', data);
+
+                if (data.success) {
+                    token = data.data.token;
+                    currentUser = data.data.user;
+                    localStorage.setItem('token', token);
+                    console.log('✅ Registration successful, loading app');
+                    await loadApp();
+                } else {
+                    showNotification('Registration failed: ' + data.message, 'error');
+                }
+            } catch (error) {
+                console.error('❌ Registration error:', error);
+                showNotification('Registration error: ' + error.message, 'error');
+            }
+        }
+
+        function logout() {
+            console.log('👋 Logging out...');
+            token = null;
+            currentUser = null;
+            currentChat = null;
+            localStorage.removeItem('token');
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            showLogin();
+        }
+
+        // App Loading
+        async function loadApp() {
+            console.log('📱 Loading main app...');
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('mainApp').classList.remove('hidden');
+
+            // Update user info
+            document.getElementById('userName').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
+            document.getElementById('userInitial').textContent = currentUser.firstName[0].toUpperCase();
+
+            // Initialize WebSocket
+            initWebSocket();
+
+            // Load data
+            await Promise.all([loadChats(), loadUsers()]);
+            
+            showNotification('Connected successfully!', 'success');
+        }
+
+        // WebSocket
+        function initWebSocket() {
+            if (socket) socket.close();
+
+            const wsUrl = `ws://localhost:8080/api/ws?token=${token}`;
+            console.log('🔌 Connecting to WebSocket:', wsUrl);
+            
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function() {
+                console.log('✅ WebSocket connected');
+                showNotification('Real-time connected', 'success');
+            };
+
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log('📥 WebSocket message:', data);
+                handleWebSocketMessage(data);
+            };
+
+            socket.onclose = function() {
+                console.log('❌ WebSocket disconnected');
+                showNotification('Connection lost, reconnecting...', 'warning');
+                setTimeout(() => {
+                    if (token) initWebSocket();
+                }, 3000);
+            };
+
+            socket.onerror = function(error) {
+                console.error('❌ WebSocket error:', error);
+            };
+        }
+
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'new_message':
+                    handleNewMessage(data.payload);
+                    break;
+                case 'typing_start':
+                    handleTypingStart(data.payload);
+                    break;
+                case 'typing_stop':
+                    handleTypingStop(data.payload);
+                    break;
+                default:
+                    console.log('🤷 Unknown message type:', data.type);
+            }
+        }
+
+        // Chat Management
+        async function loadChats() {
+            console.log('💬 Loading chats...');
+            try {
+                const response = await fetch(`${API_BASE}/chats`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    chats = data.data || [];
+                    console.log(`✅ Loaded ${chats.length} chats`);
+                    renderChats();
+                } else {
+                    console.error('❌ Failed to load chats:', data.message);
+                }
+            } catch (error) {
+                console.error('❌ Error loading chats:', error);
+            }
+        }
+
+        async function loadUsers() {
+            console.log('👥 Loading users...');
+            try {
+                const response = await fetch(`${API_BASE}/users/search?q=`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    allUsers = data.data || [];
+                    console.log(`✅ Loaded ${allUsers.length} users`);
+                } else {
+                    console.error('❌ Failed to load users:', data.message);
+                }
+            } catch (error) {
+                console.error('❌ Error loading users:', error);
+            }
+        }
+
+        function renderChats() {
+            const container = document.getElementById('chatsList');
+            
+            if (chats.length === 0) {
+                container.innerHTML = `
+                    <div class="p-8 text-center text-wa-gray">
+                        <div class="text-4xl mb-4">💬</div>
+                        <p>No chats yet</p>
+                        <button onclick="createNewChat()" class="mt-4 text-wa-green hover:underline">Start a conversation</button>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = chats.map(chat => {
+                const chatName = getChatDisplayName(chat);
+                const lastMessage = chat.lastMessage ? 
+                    (chat.lastMessage.content || 'Media message') : 
+                    'No messages yet';
+                const isActive = currentChat && currentChat.id === chat.id;
+
+                return `
+                    <div onclick="selectChat('${chat.id}')" 
+                         class="p-4 border-b border-gray-700 cursor-pointer hover:bg-wa-dark-3 transition-colors ${isActive ? 'bg-wa-dark-3' : ''}">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-12 h-12 bg-wa-green rounded-full flex items-center justify-center text-white font-bold">
+                                ${chatName[0].toUpperCase()}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-semibold truncate">${escapeHtml(chatName)}</div>
+                                <div class="text-sm text-wa-gray truncate">${escapeHtml(lastMessage)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function getChatDisplayName(chat) {
+            if (chat.type === 'group') {
+                return chat.name || 'Group Chat';
+            }
+
+            // For direct chats, find the other participant
+            const otherParticipantId = chat.participants?.find(id => id !== currentUser.id);
+            const otherUser = allUsers.find(user => user.id === otherParticipantId);
+            
+            if (otherUser) {
+                return `${otherUser.firstName} ${otherUser.lastName}`;
+            }
+            
+            return `User ${otherParticipantId?.slice(-4) || ''}`;
+        }
+
+        async function selectChat(chatId) {
+            const chat = chats.find(c => c.id === chatId);
+            if (!chat) return;
+
+            console.log('💬 Selecting chat:', chatId);
+            currentChat = chat;
+
+            // Update UI
+            document.getElementById('chatHeader').classList.remove('hidden');
+            document.getElementById('messageInputArea').classList.remove('hidden');
+            
+            const chatName = getChatDisplayName(chat);
+            document.getElementById('chatName').textContent = chatName;
+            document.getElementById('chatInitial').textContent = chatName[0].toUpperCase();
+
+            // Join chat via WebSocket
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'user_join_chat',
+                    payload: { chatId: chatId }
+                }));
+            }
+
+            // Load messages
+            await loadMessages(chatId);
+            renderChats(); // Update active state
+        }
+
+        async function loadMessages(chatId) {
+            console.log('📨 Loading messages for chat:', chatId);
+            try {
+                const response = await fetch(`${API_BASE}/messages/chat/${chatId}?limit=50`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    messages = (data.data || []).reverse();
+                    console.log(`✅ Loaded ${messages.length} messages`);
+                    renderMessages();
+                    scrollToBottom();
+                } else {
+                    console.error('❌ Failed to load messages:', data.message);
+                }
+            } catch (error) {
+                console.error('❌ Error loading messages:', error);
+            }
+        }
+
+        function renderMessages() {
+            const container = document.getElementById('messagesArea');
+            
+            if (messages.length === 0) {
+                container.innerHTML = `
+                    <div class="flex items-center justify-center h-full">
+                        <div class="text-center text-wa-gray">
+                            <div class="text-4xl mb-4">👋</div>
+                            <p>No messages yet. Say hello!</p>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = messages.map(message => {
+                const isOwn = message.senderId === currentUser.id;
+                const time = new Date(message.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                
+                return `
+                    <div class="flex ${isOwn ? 'justify-end' : 'justify-start'} mb-2">
+                        <div class="max-w-xs lg:max-w-md ${isOwn ? 'bg-wa-own' : 'bg-wa-dark-2'} rounded-2xl px-4 py-2 shadow">
+                            ${!isOwn ? `<div class="text-wa-green text-sm font-medium mb-1">${escapeHtml(message.senderName || 'Unknown')}</div>` : ''}
+                            <div class="text-white break-words">${escapeHtml(message.content)}</div>
+                            <div class="text-xs text-wa-gray mt-1 text-right">${time}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Messaging
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const content = input.value.trim();
+
+            if (!content || !currentChat) return;
+
+            console.log('📤 Sending message:', content);
+
+            // Add message optimistically
+            const tempMessage = {
+                id: 'temp_' + Date.now(),
+                senderId: currentUser.id,
+                senderName: `${currentUser.firstName} ${currentUser.lastName}`,
+                content: content,
+                createdAt: new Date().toISOString()
+            };
+
+            messages.push(tempMessage);
+            renderMessages();
+            scrollToBottom();
+
+            // Clear input
+            input.value = '';
+            input.style.height = 'auto';
+            stopTyping();
+
+            try {
+                const response = await fetch(`${API_BASE}/messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        chatId: currentChat.id,
+                        type: 'text',
+                        content: content
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    console.log('✅ Message sent successfully');
+                    // Replace temp message with real one
+                    const tempIndex = messages.findIndex(m => m.id === tempMessage.id);
+                    if (tempIndex !== -1) {
+                        messages[tempIndex] = data.data;
+                        renderMessages();
+                    }
+                } else {
+                    console.error('❌ Failed to send message:', data.message);
+                    // Remove temp message
+                    messages = messages.filter(m => m.id !== tempMessage.id);
+                    renderMessages();
+                    showNotification('Failed to send message', 'error');
+                }
+            } catch (error) {
+                console.error('❌ Error sending message:', error);
+                messages = messages.filter(m => m.id !== tempMessage.id);
+                renderMessages();
+                showNotification('Error sending message', 'error');
+            }
+        }
+
+        function handleMessageKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function handleMessageInput() {
+            const textarea = document.getElementById('messageInput');
+            
+            // Auto-resize
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 128) + 'px';
+            
+            // Handle typing
+            const content = textarea.value.trim();
+            if (content && currentChat) {
+                startTyping();
+            } else {
+                stopTyping();
+            }
+        }
+
+        // Typing Indicators
+        function startTyping() {
+            if (!isTyping && currentChat && socket && socket.readyState === WebSocket.OPEN) {
+                isTyping = true;
+                console.log('⌨️ Started typing');
+                
+                socket.send(JSON.stringify({
+                    type: 'typing_start',
+                    payload: { chatId: currentChat.id }
+                }));
+            }
+
+            // Reset timer
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(() => {
+                stopTyping();
+            }, 1000);
+        }
+
+        function stopTyping() {
+            if (isTyping && currentChat && socket && socket.readyState === WebSocket.OPEN) {
+                isTyping = false;
+                console.log('⌨️ Stopped typing');
+                
+                socket.send(JSON.stringify({
+                    type: 'typing_stop',
+                    payload: { chatId: currentChat.id }
+                }));
+            }
+            clearTimeout(typingTimer);
+        }
+
+        function handleTypingStart(payload) {
+            console.log('⌨️ Typing start received:', payload);
+            if (payload.chatId === currentChat?.id && payload.userId !== currentUser.id) {
+                document.getElementById('typingUserName').textContent = payload.username || 'Someone';
+                document.getElementById('typingIndicator').classList.remove('hidden');
+            }
+        }
+
+        function handleTypingStop(payload) {
+            console.log('⌨️ Typing stop received:', payload);
+            if (payload.chatId === currentChat?.id) {
+                document.getElementById('typingIndicator').classList.add('hidden');
+            }
+        }
+
+        // WebSocket Message Handlers
+        function handleNewMessage(payload) {
+            console.log('📨 New message received:', payload);
+            
+            // Don't add own messages (already added optimistically)
+            if (payload.message.senderId !== currentUser.id) {
+                if (payload.chatId === currentChat?.id) {
+                    messages.push(payload.message);
+                    renderMessages();
+                    scrollToBottom();
+                }
+                
+                // Update chat list
+                const chat = chats.find(c => c.id === payload.chatId);
+                if (chat) {
+                    chat.lastMessage = payload.message;
+                    renderChats();
+                }
+                
+                // Show notification if not current chat
+                if (payload.chatId !== currentChat?.id) {
+                    showNotification(`New message from ${payload.senderName}`, 'info');
+                }
+            }
+        }
+
+        // New Chat
+        function createNewChat() {
+            document.getElementById('newChatModal').classList.remove('hidden');
+            document.getElementById('userSearchInput').focus();
+        }
+
+        function closeNewChatModal() {
+            document.getElementById('newChatModal').classList.add('hidden');
+            document.getElementById('userSearchInput').value = '';
+            document.getElementById('userSearchResults').innerHTML = '';
+        }
+
+        async function searchUsers(query) {
+            if (!query.trim()) {
+                document.getElementById('userSearchResults').innerHTML = '';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/users/search?q=${encodeURIComponent(query)}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    const users = (data.data || []).filter(user => user.id !== currentUser.id);
+                    renderUserSearchResults(users);
+                }
+            } catch (error) {
+                console.error('❌ Error searching users:', error);
+            }
+        }
+
+        function renderUserSearchResults(users) {
+            const container = document.getElementById('userSearchResults');
+            
+            if (users.length === 0) {
+                container.innerHTML = '<div class="text-center text-wa-gray py-4">No users found</div>';
+                return;
+            }
+
+            container.innerHTML = users.map(user => `
+                <div onclick="startChatWithUser('${user.id}')" 
+                     class="flex items-center space-x-3 p-3 hover:bg-wa-dark-3 rounded-lg cursor-pointer transition-colors">
+                    <div class="w-10 h-10 bg-wa-green rounded-full flex items-center justify-center text-white font-bold">
+                        ${user.firstName[0].toUpperCase()}
+                    </div>
+                    <div>
+                        <div class="font-medium">${escapeHtml(user.firstName + ' ' + user.lastName)}</div>
+                        <div class="text-sm text-wa-gray">@${escapeHtml(user.username)}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function startChatWithUser(userId) {
+            console.log('💬 Starting chat with user:', userId);
+            
+            try {
+                const response = await fetch(`${API_BASE}/chats`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        type: 'direct',
+                        participants: [userId]
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    closeNewChatModal();
+                    await loadChats();
+                    await selectChat(data.data.id);
+                    showNotification('Chat created!', 'success');
+                } else {
+                    showNotification('Failed to create chat', 'error');
+                }
+            } catch (error) {
+                console.error('❌ Error creating chat:', error);
+                showNotification('Error creating chat', 'error');
+            }
+        }
+
+        // File Upload
+        async function handleFileUpload(file) {
+            if (!file || !currentChat) return;
+
+            console.log('📎 Uploading file:', file.name);
+            showNotification('Uploading file...', 'info');
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('chatId', currentChat.id);
+            formData.append('content', '');
+
+            try {
+                const response = await fetch(`${API_BASE}/messages/media`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showNotification('File uploaded!', 'success');
+                } else {
+                    showNotification('Upload failed', 'error');
+                }
+            } catch (error) {
+                console.error('❌ Error uploading file:', error);
+                showNotification('Upload error', 'error');
+            }
+
+            // Reset file input
+            document.getElementById('fileInput').value = '';
+        }
+
+        // Utilities
+        function scrollToBottom() {
+            const container = document.getElementById('messagesArea');
+            setTimeout(() => {
+                container.scrollTop = container.scrollHeight;
+            }, 100);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showNotification(message, type = 'info') {
+            console.log(`📢 Notification: ${message} (${type})`);
+            
+            const notification = document.getElementById('notification');
+            const text = document.getElementById('notificationText');
+            
+            text.textContent = message;
+            
+            // Set color based on type
+            notification.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 transform transition-transform duration-300 ${
+                type === 'error' ? 'bg-red-600' :
+                type === 'warning' ? 'bg-yellow-600' :
+                type === 'success' ? 'bg-green-600' :
+                'bg-wa-green'
+            } text-white`;
+            
+            // Show notification
+            notification.classList.remove('hidden', 'translate-x-full');
+            
+            // Hide after 3 seconds
+            setTimeout(() => {
+                notification.classList.add('translate-x-full');
+                setTimeout(() => {
+                    notification.classList.add('hidden');
+                }, 300);
+            }, 3000);
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeNewChatModal();
+            }
+        });
+    </script>
+</body>
+</html>
