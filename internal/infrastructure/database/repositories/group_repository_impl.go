@@ -1,3 +1,4 @@
+// internal/infrastructure/database/repositories/group_repository_impl.go
 package repositories
 
 import (
@@ -5,7 +6,7 @@ import (
 	"bro-chat/internal/domain/repositories"
 	"context"
 	"crypto/rand"
-	"encoding/hex"
+	"fmt"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -15,132 +16,113 @@ import (
 )
 
 type groupRepository struct {
-	chatCollection     *mongo.Collection
-	membersCollection  *mongo.Collection
-	invitesCollection  *mongo.Collection
-	activityCollection *mongo.Collection
-	userCollection     *mongo.Collection
+	database              *mongo.Database
+	collection            *mongo.Collection
+	memberCollection      *mongo.Collection
+	inviteCollection      *mongo.Collection
+	preferencesCollection *mongo.Collection
+	activityCollection    *mongo.Collection
+	userCollection        *mongo.Collection
 }
 
 func NewGroupRepository(db *mongo.Database) repositories.GroupRepository {
-	repo := &groupRepository{
-		chatCollection:     db.Collection("chats"),
-		membersCollection:  db.Collection("group_members"),
-		invitesCollection:  db.Collection("group_invites"),
-		activityCollection: db.Collection("group_activities"),
-		userCollection:     db.Collection("users"),
+	return &groupRepository{
+		database:              db,
+		collection:            db.Collection("groups"),
+		memberCollection:      db.Collection("group_members"),
+		inviteCollection:      db.Collection("group_invites"),
+		preferencesCollection: db.Collection("user_group_preferences"),
+		activityCollection:    db.Collection("group_activities"),
+		userCollection:        db.Collection("users"),
 	}
-
-	repo.createIndexes()
-	return repo
 }
 
-func (r *groupRepository) createIndexes() {
-	ctx := context.Background()
-
-	// Group members indexes
-	r.membersCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{
-			{"group_id", 1},
-			{"user_id", 1},
-		},
-		Options: options.Index().SetUnique(true),
-	})
-
-	// Group invites indexes
-	r.invitesCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{"invite_code", 1}},
-		Options: options.Index().SetUnique(true),
-	})
-
-	// Group activities index
-	r.activityCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{
-			{"group_id", 1},
-			{"timestamp", -1},
-		},
-	})
-}
+// ========== Group Information ==========
 
 func (r *groupRepository) GetGroupInfo(ctx context.Context, groupID primitive.ObjectID) (*entities.GroupInfo, error) {
-	// Get group chat info
-	var chat entities.Chat
-	err := r.chatCollection.FindOne(ctx, bson.M{"_id": groupID, "type": "group"}).Decode(&chat)
+	var group entities.GroupInfo
+	err := r.collection.FindOne(ctx, bson.M{"_id": groupID}).Decode(&group)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get group members
+	// Get member count
+	memberCount, err := r.memberCollection.CountDocuments(ctx, bson.M{
+		"group_id":  groupID,
+		"is_active": true,
+	})
+	if err == nil {
+		group.MemberCount = int(memberCount)
+	}
+
+	// Get members with user data
 	members, err := r.GetGroupMembers(ctx, groupID)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		group.Members = members
 	}
 
 	// Get pending invites
-	pendingInvites, err := r.GetGroupInvites(ctx, groupID)
-	if err != nil {
-		return nil, err
+	invites, err := r.GetGroupInvites(ctx, groupID)
+	if err == nil {
+		group.PendingInvites = make([]entities.GroupInvite, len(invites))
+		for i, invite := range invites {
+			group.PendingInvites[i] = *invite
+		}
 	}
 
-	return &entities.GroupInfo{
-		Chat:           &chat,
-		MemberCount:    len(members),
-		Members:        members,
-		PendingInvites: pendingInvites,
-		Settings:       chat.Settings,
-	}, nil
+	return &group, nil
 }
 
-func (r *groupRepository) UpdateGroupInfo(ctx context.Context, groupID primitive.ObjectID, updates *entities.UpdateGroupInfoRequest) error {
-	updateDoc := bson.M{"updated_at": time.Now()}
+func (r *groupRepository) UpdateGroupInfo(ctx context.Context, groupID primitive.ObjectID, req *entities.UpdateGroupInfoRequest) error {
+	update := bson.M{}
+	if req.Name != "" {
+		update["name"] = req.Name
+	}
+	if req.Description != "" {
+		update["description"] = req.Description
+	}
+	if req.Avatar != "" {
+		update["avatar"] = req.Avatar
+	}
+	update["updated_at"] = time.Now()
 
-	if updates.Name != "" {
-		updateDoc["name"] = updates.Name
-	}
-	if updates.Description != "" {
-		updateDoc["description"] = updates.Description
-	}
-	if updates.Avatar != "" {
-		updateDoc["avatar"] = updates.Avatar
-	}
-
-	_, err := r.chatCollection.UpdateOne(
+	_, err := r.collection.UpdateOne(
 		ctx,
-		bson.M{"_id": groupID, "type": "group"},
-		bson.M{"$set": updateDoc},
+		bson.M{"_id": groupID},
+		bson.M{"$set": update},
 	)
 	return err
 }
 
-func (r *groupRepository) UpdateGroupSettings(ctx context.Context, groupID primitive.ObjectID, settings *entities.UpdateGroupSettingsRequest) error {
-	updateDoc := bson.M{"updated_at": time.Now()}
+func (r *groupRepository) UpdateGroupSettings(ctx context.Context, groupID primitive.ObjectID, req *entities.UpdateGroupSettingsRequest) error {
+	update := bson.M{}
+	if req.WhoCanSendMessages != "" {
+		update["settings.who_can_send_messages"] = req.WhoCanSendMessages
+	}
+	if req.WhoCanEditInfo != "" {
+		update["settings.who_can_edit_info"] = req.WhoCanEditInfo
+	}
+	if req.WhoCanAddMembers != "" {
+		update["settings.who_can_add_members"] = req.WhoCanAddMembers
+	}
+	update["settings.disappearing_messages"] = req.DisappearingMessages
+	if req.DisappearingTime != nil {
+		update["settings.disappearing_time"] = *req.DisappearingTime
+	}
+	update["updated_at"] = time.Now()
 
-	if settings.WhoCanSendMessages != "" {
-		updateDoc["settings.who_can_send_messages"] = settings.WhoCanSendMessages
-	}
-	if settings.WhoCanEditInfo != "" {
-		updateDoc["settings.who_can_edit_info"] = settings.WhoCanEditInfo
-	}
-	if settings.WhoCanAddMembers != "" {
-		updateDoc["settings.who_can_add_members"] = settings.WhoCanAddMembers
-	}
-	if settings.DisappearingMessages != nil {
-		updateDoc["settings.disappearing_messages"] = *settings.DisappearingMessages
-	}
-	if settings.DisappearingTime != nil {
-		updateDoc["settings.disappearing_time"] = *settings.DisappearingTime
-	}
-
-	_, err := r.chatCollection.UpdateOne(
+	_, err := r.collection.UpdateOne(
 		ctx,
-		bson.M{"_id": groupID, "type": "group"},
-		bson.M{"$set": updateDoc},
+		bson.M{"_id": groupID},
+		bson.M{"$set": update},
 	)
 	return err
 }
+
+// ========== Member Management ==========
 
 func (r *groupRepository) AddMember(ctx context.Context, groupID, userID, addedBy primitive.ObjectID, role entities.GroupRole) error {
-	member := &entities.GroupMember{
+	member := entities.GroupMember{
 		ID:       primitive.NewObjectID(),
 		GroupID:  groupID,
 		UserID:   userID,
@@ -150,82 +132,133 @@ func (r *groupRepository) AddMember(ctx context.Context, groupID, userID, addedB
 		IsActive: true,
 	}
 
-	// Insert member
-	_, err := r.membersCollection.InsertOne(ctx, member)
+	// Add to members collection
+	_, err := r.memberCollection.InsertOne(ctx, member)
 	if err != nil {
 		return err
 	}
 
-	// Update chat participants
-	_, err = r.chatCollection.UpdateOne(
+	// Add to group's participants array
+	_, err = r.collection.UpdateOne(
 		ctx,
 		bson.M{"_id": groupID},
-		bson.M{"$addToSet": bson.M{"participants": userID}},
+		bson.M{
+			"$addToSet": bson.M{"participants": userID},
+			"$set":      bson.M{"updated_at": time.Now()},
+		},
 	)
+	if err != nil {
+		return err
+	}
+
+	// If admin role, add to admins array
+	if role == entities.RoleAdmin {
+		_, err = r.collection.UpdateOne(
+			ctx,
+			bson.M{"_id": groupID},
+			bson.M{"$addToSet": bson.M{"admins": userID}},
+		)
+	}
+
 	return err
 }
 
 func (r *groupRepository) RemoveMember(ctx context.Context, groupID, userID primitive.ObjectID) error {
-	// Mark member as inactive
-	_, err := r.membersCollection.UpdateOne(
+	// Deactivate member
+	_, err := r.memberCollection.UpdateOne(
 		ctx,
-		bson.M{"group_id": groupID, "user_id": userID},
-		bson.M{"$set": bson.M{"is_active": false, "left_at": time.Now()}},
+		bson.M{
+			"group_id":  groupID,
+			"user_id":   userID,
+			"is_active": true,
+		},
+		bson.M{"$set": bson.M{"is_active": false}},
 	)
 	if err != nil {
 		return err
 	}
 
-	// Remove from chat participants
-	_, err = r.chatCollection.UpdateOne(
+	// Remove from group's participants and admins arrays
+	_, err = r.collection.UpdateOne(
 		ctx,
 		bson.M{"_id": groupID},
-		bson.M{"$pull": bson.M{"participants": userID}},
+		bson.M{
+			"$pull": bson.M{
+				"participants": userID,
+				"admins":       userID,
+			},
+			"$set": bson.M{"updated_at": time.Now()},
+		},
 	)
+	return err
+}
+
+func (r *groupRepository) ChangeRole(ctx context.Context, groupID, userID primitive.ObjectID, role entities.GroupRole) error {
+	_, err := r.memberCollection.UpdateOne(
+		ctx,
+		bson.M{
+			"group_id":  groupID,
+			"user_id":   userID,
+			"is_active": true,
+		},
+		bson.M{"$set": bson.M{"role": role}},
+	)
+	if err != nil {
+		return err
+	}
+
+	// Update admins array based on new role
+	if role == entities.RoleAdmin {
+		_, err = r.collection.UpdateOne(
+			ctx,
+			bson.M{"_id": groupID},
+			bson.M{"$addToSet": bson.M{"admins": userID}},
+		)
+	} else {
+		_, err = r.collection.UpdateOne(
+			ctx,
+			bson.M{"_id": groupID},
+			bson.M{"$pull": bson.M{"admins": userID}},
+		)
+	}
 	return err
 }
 
 func (r *groupRepository) GetGroupMembers(ctx context.Context, groupID primitive.ObjectID) ([]entities.GroupMemberWithUser, error) {
 	pipeline := []bson.M{
-		{"$match": bson.M{"group_id": groupID, "is_active": true}},
-		{"$lookup": bson.M{
-			"from":         "users",
-			"localField":   "user_id",
-			"foreignField": "_id",
-			"as":           "user",
-		}},
-		{"$unwind": "$user"},
-		{"$sort": bson.M{"joined_at": 1}},
+		{
+			"$match": bson.M{
+				"group_id":  groupID,
+				"is_active": true,
+			},
+		},
+		{
+			"$lookup": bson.M{
+				"from":         "users",
+				"localField":   "user_id",
+				"foreignField": "_id",
+				"as":           "user",
+			},
+		},
+		{
+			"$unwind": "$user",
+		},
 	}
 
-	cursor, err := r.membersCollection.Aggregate(ctx, pipeline)
+	cursor, err := r.memberCollection.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, err
 	}
 	defer cursor.Close(ctx)
 
 	var members []entities.GroupMemberWithUser
-	for cursor.Next(ctx) {
-		var result struct {
-			entities.GroupMember `bson:",inline"`
-			User                 entities.User `bson:"user"`
-		}
-		if err := cursor.Decode(&result); err != nil {
-			continue
-		}
-
-		members = append(members, entities.GroupMemberWithUser{
-			GroupMember: &result.GroupMember,
-			User:        result.User,
-		})
-	}
-
-	return members, nil
+	err = cursor.All(ctx, &members)
+	return members, err
 }
 
 func (r *groupRepository) GetMemberRole(ctx context.Context, groupID, userID primitive.ObjectID) (entities.GroupRole, error) {
 	var member entities.GroupMember
-	err := r.membersCollection.FindOne(ctx, bson.M{
+	err := r.memberCollection.FindOne(ctx, bson.M{
 		"group_id":  groupID,
 		"user_id":   userID,
 		"is_active": true,
@@ -236,17 +269,10 @@ func (r *groupRepository) GetMemberRole(ctx context.Context, groupID, userID pri
 	return member.Role, nil
 }
 
-func (r *groupRepository) ChangeRole(ctx context.Context, groupID, userID primitive.ObjectID, role entities.GroupRole) error {
-	_, err := r.membersCollection.UpdateOne(
-		ctx,
-		bson.M{"group_id": groupID, "user_id": userID, "is_active": true},
-		bson.M{"$set": bson.M{"role": role}},
-	)
-	return err
-}
+// ========== Permission Checks ==========
 
 func (r *groupRepository) IsGroupMember(ctx context.Context, groupID, userID primitive.ObjectID) (bool, error) {
-	count, err := r.membersCollection.CountDocuments(ctx, bson.M{
+	count, err := r.memberCollection.CountDocuments(ctx, bson.M{
 		"group_id":  groupID,
 		"user_id":   userID,
 		"is_active": true,
@@ -255,53 +281,46 @@ func (r *groupRepository) IsGroupMember(ctx context.Context, groupID, userID pri
 }
 
 func (r *groupRepository) IsGroupAdmin(ctx context.Context, groupID, userID primitive.ObjectID) (bool, error) {
-	count, err := r.membersCollection.CountDocuments(ctx, bson.M{
-		"group_id":  groupID,
-		"user_id":   userID,
-		"is_active": true,
-		"role":      bson.M{"$in": []string{"admin", "owner"}},
+	// Check if user is owner first
+	isOwner, err := r.IsGroupOwner(ctx, groupID, userID)
+	if err != nil {
+		return false, err
+	}
+	if isOwner {
+		return true, nil
+	}
+
+	// Check if user is in admins array
+	count, err := r.collection.CountDocuments(ctx, bson.M{
+		"_id":    groupID,
+		"admins": userID,
 	})
 	return count > 0, err
 }
 
 func (r *groupRepository) IsGroupOwner(ctx context.Context, groupID, userID primitive.ObjectID) (bool, error) {
-	count, err := r.membersCollection.CountDocuments(ctx, bson.M{
-		"group_id":  groupID,
-		"user_id":   userID,
-		"is_active": true,
-		"role":      "owner",
+	count, err := r.collection.CountDocuments(ctx, bson.M{
+		"_id":   groupID,
+		"owner": userID,
 	})
 	return count > 0, err
 }
 
-func (r *groupRepository) CreateInvite(ctx context.Context, invite *entities.GroupInvite) error {
-	// Generate unique invite code
-	invite.ID = primitive.NewObjectID()
-	invite.InviteCode = r.generateInviteCode()
-	invite.CreatedAt = time.Now()
-	invite.IsActive = true
+// ========== Invitation Management ==========
 
-	_, err := r.invitesCollection.InsertOne(ctx, invite)
+func (r *groupRepository) CreateInvite(ctx context.Context, invite *entities.GroupInvite) error {
+	invite.ID = primitive.NewObjectID()
+	invite.InviteCode = generateInviteCode()
+	invite.InviteLink = fmt.Sprintf("/invite/%s", invite.InviteCode)
+	invite.IsActive = true
+	invite.CreatedAt = time.Now()
+
+	_, err := r.inviteCollection.InsertOne(ctx, invite)
 	return err
 }
 
-func (r *groupRepository) generateInviteCode() string {
-	bytes := make([]byte, 16)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
-}
-
-func (r *groupRepository) GetInviteByCode(ctx context.Context, inviteCode string) (*entities.GroupInvite, error) {
-	var invite entities.GroupInvite
-	err := r.invitesCollection.FindOne(ctx, bson.M{
-		"invite_code": inviteCode,
-		"is_active":   true,
-	}).Decode(&invite)
-	return &invite, err
-}
-
-func (r *groupRepository) GetGroupInvites(ctx context.Context, groupID primitive.ObjectID) ([]entities.GroupInvite, error) {
-	cursor, err := r.invitesCollection.Find(ctx, bson.M{
+func (r *groupRepository) GetGroupInvites(ctx context.Context, groupID primitive.ObjectID) ([]*entities.GroupInvite, error) {
+	cursor, err := r.inviteCollection.Find(ctx, bson.M{
 		"group_id":  groupID,
 		"is_active": true,
 	})
@@ -310,29 +329,34 @@ func (r *groupRepository) GetGroupInvites(ctx context.Context, groupID primitive
 	}
 	defer cursor.Close(ctx)
 
-	var invites []entities.GroupInvite
-	for cursor.Next(ctx) {
-		var invite entities.GroupInvite
-		if err := cursor.Decode(&invite); err != nil {
-			continue
-		}
-		invites = append(invites, invite)
-	}
-
-	return invites, nil
+	var invites []*entities.GroupInvite
+	err = cursor.All(ctx, &invites)
+	return invites, err
 }
 
-func (r *groupRepository) UpdateInviteUsage(ctx context.Context, inviteID primitive.ObjectID) error {
-	_, err := r.invitesCollection.UpdateOne(
-		ctx,
-		bson.M{"_id": inviteID},
-		bson.M{"$inc": bson.M{"current_uses": 1}},
-	)
-	return err
+func (r *groupRepository) GetInviteByID(ctx context.Context, inviteID primitive.ObjectID) (*entities.GroupInvite, error) {
+	var invite entities.GroupInvite
+	err := r.inviteCollection.FindOne(ctx, bson.M{"_id": inviteID}).Decode(&invite)
+	if err != nil {
+		return nil, err
+	}
+	return &invite, nil
+}
+
+func (r *groupRepository) GetInviteByCode(ctx context.Context, inviteCode string) (*entities.GroupInvite, error) {
+	var invite entities.GroupInvite
+	err := r.inviteCollection.FindOne(ctx, bson.M{
+		"invite_code": inviteCode,
+		"is_active":   true,
+	}).Decode(&invite)
+	if err != nil {
+		return nil, err
+	}
+	return &invite, nil
 }
 
 func (r *groupRepository) RevokeInvite(ctx context.Context, inviteID primitive.ObjectID) error {
-	_, err := r.invitesCollection.UpdateOne(
+	_, err := r.inviteCollection.UpdateOne(
 		ctx,
 		bson.M{"_id": inviteID},
 		bson.M{"$set": bson.M{"is_active": false}},
@@ -340,101 +364,179 @@ func (r *groupRepository) RevokeInvite(ctx context.Context, inviteID primitive.O
 	return err
 }
 
-func (r *groupRepository) PinGroup(ctx context.Context, groupID, userID primitive.ObjectID) error {
-	// This would typically be stored in a user-specific collection
-	// For now, we'll update the chat itself
-	_, err := r.chatCollection.UpdateOne(
+func (r *groupRepository) UpdateInviteUsage(ctx context.Context, inviteID primitive.ObjectID) error {
+	_, err := r.inviteCollection.UpdateOne(
 		ctx,
-		bson.M{"_id": groupID},
-		bson.M{"$set": bson.M{"is_pinned": true}},
+		bson.M{"_id": inviteID},
+		bson.M{"$inc": bson.M{"current_uses": 1}},
 	)
 	return err
 }
 
+// ========== Group Actions ==========
+
+func (r *groupRepository) PinGroup(ctx context.Context, groupID, userID primitive.ObjectID) error {
+	return r.updateUserGroupPreference(ctx, userID, groupID, "is_pinned", true)
+}
+
 func (r *groupRepository) UnpinGroup(ctx context.Context, groupID, userID primitive.ObjectID) error {
-	_, err := r.chatCollection.UpdateOne(
-		ctx,
-		bson.M{"_id": groupID},
-		bson.M{"$set": bson.M{"is_pinned": false}},
-	)
-	return err
+	return r.updateUserGroupPreference(ctx, userID, groupID, "is_pinned", false)
 }
 
 func (r *groupRepository) MuteGroup(ctx context.Context, groupID, userID primitive.ObjectID, duration int) error {
 	var muteUntil *time.Time
-	if duration > 0 {
-		t := time.Now().Add(time.Duration(duration) * time.Second)
-		muteUntil = &t
+	if duration == -1 {
+		// Forever
+		foreverTime := time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
+		muteUntil = &foreverTime
+	} else {
+		untilTime := time.Now().Add(time.Duration(duration) * time.Second)
+		muteUntil = &untilTime
 	}
 
-	_, err := r.chatCollection.UpdateOne(
-		ctx,
-		bson.M{"_id": groupID},
-		bson.M{"$set": bson.M{
-			"is_muted":    true,
-			"muted_until": muteUntil,
-		}},
-	)
-	return err
+	err := r.updateUserGroupPreference(ctx, userID, groupID, "is_muted", true)
+	if err != nil {
+		return err
+	}
+	return r.updateUserGroupPreference(ctx, userID, groupID, "muted_until", muteUntil)
 }
 
 func (r *groupRepository) UnmuteGroup(ctx context.Context, groupID, userID primitive.ObjectID) error {
-	_, err := r.chatCollection.UpdateOne(
-		ctx,
-		bson.M{"_id": groupID},
-		bson.M{"$set": bson.M{
-			"is_muted":    false,
-			"muted_until": nil,
-		}},
-	)
-	return err
+	err := r.updateUserGroupPreference(ctx, userID, groupID, "is_muted", false)
+	if err != nil {
+		return err
+	}
+	return r.updateUserGroupPreference(ctx, userID, groupID, "muted_until", nil)
 }
 
 func (r *groupRepository) ArchiveGroup(ctx context.Context, groupID, userID primitive.ObjectID) error {
-	_, err := r.chatCollection.UpdateOne(
-		ctx,
-		bson.M{"_id": groupID},
-		bson.M{"$set": bson.M{"is_archived": true}},
-	)
-	return err
+	return r.updateUserGroupPreference(ctx, userID, groupID, "is_archived", true)
 }
 
 func (r *groupRepository) UnarchiveGroup(ctx context.Context, groupID, userID primitive.ObjectID) error {
-	_, err := r.chatCollection.UpdateOne(
-		ctx,
-		bson.M{"_id": groupID},
-		bson.M{"$set": bson.M{"is_archived": false}},
-	)
+	return r.updateUserGroupPreference(ctx, userID, groupID, "is_archived", false)
+}
+
+// Helper method for user-group preferences
+func (r *groupRepository) updateUserGroupPreference(ctx context.Context, userID, groupID primitive.ObjectID, field string, value interface{}) error {
+	filter := bson.M{
+		"user_id":  userID,
+		"group_id": groupID,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			field:        value,
+			"updated_at": time.Now(),
+		},
+		"$setOnInsert": bson.M{
+			"user_id":    userID,
+			"group_id":   groupID,
+			"created_at": time.Now(),
+		},
+	}
+	opts := options.Update().SetUpsert(true)
+
+	_, err := r.preferencesCollection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
+// ========== Activity Logging ==========
+
 func (r *groupRepository) LogActivity(ctx context.Context, activity *entities.GroupActivity) error {
 	activity.ID = primitive.NewObjectID()
-	activity.Timestamp = time.Now()
-
+	activity.CreatedAt = time.Now()
 	_, err := r.activityCollection.InsertOne(ctx, activity)
 	return err
 }
 
 func (r *groupRepository) GetGroupActivities(ctx context.Context, groupID primitive.ObjectID, limit int) ([]entities.GroupActivity, error) {
-	cursor, err := r.activityCollection.Find(
-		ctx,
-		bson.M{"group_id": groupID},
-		options.Find().SetSort(bson.M{"timestamp": -1}).SetLimit(int64(limit)),
-	)
+	opts := options.Find().SetSort(bson.D{{"created_at", -1}}).SetLimit(int64(limit))
+	cursor, err := r.activityCollection.Find(ctx, bson.M{"group_id": groupID}, opts)
 	if err != nil {
 		return nil, err
 	}
 	defer cursor.Close(ctx)
 
 	var activities []entities.GroupActivity
-	for cursor.Next(ctx) {
-		var activity entities.GroupActivity
-		if err := cursor.Decode(&activity); err != nil {
-			continue
-		}
-		activities = append(activities, activity)
+	err = cursor.All(ctx, &activities)
+	return activities, err
+}
+
+// ========== Group Creation ==========
+
+func (r *groupRepository) CreateGroup(ctx context.Context, group *entities.GroupInfo) error {
+	group.ID = primitive.NewObjectID()
+	group.CreatedAt = time.Now()
+	group.UpdatedAt = time.Now()
+	group.Type = "group"
+
+	_, err := r.collection.InsertOne(ctx, group)
+	return err
+}
+
+func (r *groupRepository) DeleteGroup(ctx context.Context, groupID primitive.ObjectID) error {
+	// Soft delete - mark as inactive
+	_, err := r.collection.UpdateOne(
+		ctx,
+		bson.M{"_id": groupID},
+		bson.M{"$set": bson.M{
+			"is_active":  false,
+			"deleted_at": time.Now(),
+		}},
+	)
+	return err
+}
+
+func (r *groupRepository) GetUserGroups(ctx context.Context, userID primitive.ObjectID) ([]entities.GroupInfo, error) {
+	// Get groups where user is a member
+	pipeline := []bson.M{
+		{
+			"$match": bson.M{
+				"user_id":   userID,
+				"is_active": true,
+			},
+		},
+		{
+			"$lookup": bson.M{
+				"from":         "groups",
+				"localField":   "group_id",
+				"foreignField": "_id",
+				"as":           "group",
+			},
+		},
+		{
+			"$unwind": "$group",
+		},
+		{
+			"$replaceRoot": bson.M{
+				"newRoot": "$group",
+			},
+		},
 	}
 
-	return activities, nil
+	cursor, err := r.memberCollection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var groups []entities.GroupInfo
+	err = cursor.All(ctx, &groups)
+	return groups, err
+}
+
+// Helper function to generate invite codes
+func generateInviteCode() string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 8)
+	_, err := rand.Read(b)
+	if err != nil {
+		// Fallback to time-based generation
+		return fmt.Sprintf("%d", time.Now().Unix())
+	}
+
+	for i := range b {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+	return string(b)
 }

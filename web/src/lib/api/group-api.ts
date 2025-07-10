@@ -1,5 +1,8 @@
+// src/lib/api/group-api.ts
 
+import axios from 'axios';
 import { groupEndpoints } from '@/config/api-endpoints';
+import { getStoredTokens } from '@/lib/storage';
 import type {
   GroupInfo,
   UpdateGroupInfoRequest,
@@ -13,28 +16,58 @@ import type {
   MuteGroupRequest,
   GroupInviteInfo,
 } from '@/types/group';
+import type { ApiResponse } from '@/types/api';
 
-export class GroupAPI extends BaseAPI {
+export class GroupAPI {
+  private baseURL: string;
+
+  constructor() {
+    this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+  }
+
+  private getAuthHeaders() {
+    const { accessToken } = getStoredTokens();
+    return {
+      'Content-Type': 'application/json',
+      ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
+    };
+  }
+
+  private async request<T>(method: string, url: string, data?: any): Promise<T> {
+    try {
+      const response = await axios({
+        method,
+        url: `${this.baseURL}${url}`,
+        data,
+        headers: this.getAuthHeaders(),
+        timeout: 30000,
+      });
+      
+      // Handle both direct data and wrapped responses
+      return response.data.data || response.data;
+    } catch (error) {
+      console.error(`❌ ${method.toUpperCase()} ${url} failed:`, error);
+      throw error;
+    }
+  }
+
   // Group information
   async getGroupInfo(groupId: string): Promise<GroupInfo> {
-    const response = await this.get<{ data: GroupInfo }>(
-      groupEndpoints.getGroupInfo(groupId)
-    );
-    return response.data;
+    return this.request<GroupInfo>('GET', groupEndpoints.getGroupInfo(groupId));
   }
 
   async updateGroupInfo(
     groupId: string,
     updates: UpdateGroupInfoRequest
   ): Promise<void> {
-    await this.put(groupEndpoints.updateGroupInfo(groupId), updates);
+    await this.request<void>('PUT', groupEndpoints.updateGroupInfo(groupId), updates);
   }
 
   async updateGroupSettings(
     groupId: string,
     settings: UpdateGroupSettingsRequest
   ): Promise<void> {
-    await this.put(groupEndpoints.updateGroupSettings(groupId), settings);
+    await this.request<void>('PUT', groupEndpoints.updateGroupSettings(groupId), settings);
   }
 
   // Member management
@@ -42,19 +75,15 @@ export class GroupAPI extends BaseAPI {
     groupId: string,
     request: AddMembersRequest
   ): Promise<AddMembersResult> {
-    const response = await this.post<{ data: AddMembersResult }>(
-      groupEndpoints.addMembers(groupId),
-      request
-    );
-    return response.data;
+    return this.request<AddMembersResult>('POST', groupEndpoints.addMembers(groupId), request);
   }
 
   async removeMember(groupId: string, userId: string): Promise<void> {
-    await this.delete(groupEndpoints.removeMember(groupId, userId));
+    await this.request<void>('DELETE', groupEndpoints.removeMember(groupId, userId));
   }
 
   async leaveGroup(groupId: string): Promise<void> {
-    await this.post(groupEndpoints.leaveGroup(groupId));
+    await this.request<void>('POST', groupEndpoints.leaveGroup(groupId));
   }
 
   async changeRole(
@@ -62,7 +91,7 @@ export class GroupAPI extends BaseAPI {
     userId: string,
     request: ChangeRoleRequest
   ): Promise<void> {
-    await this.put(groupEndpoints.changeRole(groupId, userId), request);
+    await this.request<void>('PUT', groupEndpoints.changeRole(groupId, userId), request);
   }
 
   // Group invitations
@@ -70,58 +99,48 @@ export class GroupAPI extends BaseAPI {
     groupId: string,
     request: CreateInviteRequest
   ): Promise<GroupInvite> {
-    const response = await this.post<{ data: GroupInvite }>(
-      groupEndpoints.createInvite(groupId),
-      request
-    );
-    return response.data;
+    return this.request<GroupInvite>('POST', groupEndpoints.createInvite(groupId), request);
   }
 
   async getGroupInvites(groupId: string): Promise<GroupInvite[]> {
-    const response = await this.get<{ data: GroupInvite[] }>(
-      groupEndpoints.getGroupInvites(groupId)
-    );
-    return response.data;
+    return this.request<GroupInvite[]>('GET', groupEndpoints.getGroupInvites(groupId));
   }
 
   async revokeInvite(groupId: string, inviteId: string): Promise<void> {
-    await this.delete(groupEndpoints.revokeInvite(groupId, inviteId));
+    await this.request<void>('DELETE', groupEndpoints.revokeInvite(groupId, inviteId));
   }
 
   async joinViaInvite(request: JoinViaInviteRequest): Promise<void> {
-    await this.post(groupEndpoints.joinViaInvite(), request);
+    await this.request<void>('POST', groupEndpoints.joinViaInvite(), request);
   }
 
   async getInviteInfo(inviteCode: string): Promise<GroupInviteInfo> {
-    const response = await this.get<{ data: GroupInviteInfo }>(
-      groupEndpoints.getInviteInfo(inviteCode)
-    );
-    return response.data;
+    return this.request<GroupInviteInfo>('GET', groupEndpoints.getInviteInfo(inviteCode));
   }
 
   // Group actions
   async pinGroup(groupId: string): Promise<void> {
-    await this.post(groupEndpoints.pinGroup(groupId));
+    await this.request<void>('POST', groupEndpoints.pinGroup(groupId));
   }
 
   async unpinGroup(groupId: string): Promise<void> {
-    await this.post(groupEndpoints.unpinGroup(groupId));
+    await this.request<void>('POST', groupEndpoints.unpinGroup(groupId));
   }
 
   async muteGroup(groupId: string, request: MuteGroupRequest): Promise<void> {
-    await this.post(groupEndpoints.muteGroup(groupId), request);
+    await this.request<void>('POST', groupEndpoints.muteGroup(groupId), request);
   }
 
   async unmuteGroup(groupId: string): Promise<void> {
-    await this.post(groupEndpoints.unmuteGroup(groupId));
+    await this.request<void>('POST', groupEndpoints.unmuteGroup(groupId));
   }
 
   async archiveGroup(groupId: string): Promise<void> {
-    await this.post(groupEndpoints.archiveGroup(groupId));
+    await this.request<void>('POST', groupEndpoints.archiveGroup(groupId));
   }
 
   async unarchiveGroup(groupId: string): Promise<void> {
-    await this.post(groupEndpoints.unarchiveGroup(groupId));
+    await this.request<void>('POST', groupEndpoints.unarchiveGroup(groupId));
   }
 }
 

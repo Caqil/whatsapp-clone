@@ -1,12 +1,12 @@
+// internal/usecases/group_usecase.go
 package usecases
 
 import (
-	"bro-chat/internal/domain/entities"
-	"bro-chat/internal/domain/repositories"
-	"bro-chat/pkg/websocket"
 	"context"
 	"errors"
 	"time"
+	"bro-chat/internal/domain/entities"
+	"bro-chat/internal/domain/repositories"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -14,23 +14,16 @@ import (
 type GroupUsecase struct {
 	groupRepo repositories.GroupRepository
 	userRepo  repositories.UserRepository
-	chatRepo  repositories.ChatRepository
-	hub       *websocket.Hub
 }
 
-func NewGroupUsecase(
-	groupRepo repositories.GroupRepository,
-	userRepo repositories.UserRepository,
-	chatRepo repositories.ChatRepository,
-	hub *websocket.Hub,
-) *GroupUsecase {
+func NewGroupUsecase(groupRepo repositories.GroupRepository, userRepo repositories.UserRepository) *GroupUsecase {
 	return &GroupUsecase{
 		groupRepo: groupRepo,
 		userRepo:  userRepo,
-		chatRepo:  chatRepo,
-		hub:       hub,
 	}
 }
+
+// ========== Group Information ==========
 
 func (u *GroupUsecase) GetGroupInfo(ctx context.Context, groupIDStr, userIDStr string) (*entities.GroupInfo, error) {
 	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
@@ -49,13 +42,14 @@ func (u *GroupUsecase) GetGroupInfo(ctx context.Context, groupIDStr, userIDStr s
 		return nil, err
 	}
 	if !isMember {
-		return nil, errors.New("user is not a member of this group")
+		return nil, errors.New("you are not a member of this group")
 	}
 
+	// Get group info
 	return u.groupRepo.GetGroupInfo(ctx, groupID)
 }
 
-func (u *GroupUsecase) UpdateGroupInfo(ctx context.Context, groupIDStr, userIDStr string, updates *entities.UpdateGroupInfoRequest) error {
+func (u *GroupUsecase) UpdateGroupInfo(ctx context.Context, groupIDStr, userIDStr string, req *entities.UpdateGroupInfoRequest) error {
 	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
 	if err != nil {
 		return errors.New("invalid group ID")
@@ -76,23 +70,24 @@ func (u *GroupUsecase) UpdateGroupInfo(ctx context.Context, groupIDStr, userIDSt
 	}
 
 	// Update group info
-	err = u.groupRepo.UpdateGroupInfo(ctx, groupID, updates)
+	err = u.groupRepo.UpdateGroupInfo(ctx, groupID, req)
 	if err != nil {
 		return err
 	}
 
 	// Log activity
 	u.logActivity(ctx, groupID, userID, "group_info_updated", nil, map[string]interface{}{
-		"updates": updates,
+		"name":        req.Name,
+		"description": req.Description,
 	})
 
-	// Broadcast update
-	u.broadcastGroupUpdate(groupID, "group_info_updated", updates)
+	// Broadcast group update
+	u.broadcastGroupUpdate(groupID, "group_info_updated", req)
 
 	return nil
 }
 
-func (u *GroupUsecase) UpdateGroupSettings(ctx context.Context, groupIDStr, userIDStr string, settings *entities.UpdateGroupSettingsRequest) error {
+func (u *GroupUsecase) UpdateGroupSettings(ctx context.Context, groupIDStr, userIDStr string, req *entities.UpdateGroupSettingsRequest) error {
 	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
 	if err != nil {
 		return errors.New("invalid group ID")
@@ -103,31 +98,33 @@ func (u *GroupUsecase) UpdateGroupSettings(ctx context.Context, groupIDStr, user
 		return errors.New("invalid user ID")
 	}
 
-	// Check if user is admin
+	// Check if user is admin or owner
 	isAdmin, err := u.groupRepo.IsGroupAdmin(ctx, groupID, userID)
 	if err != nil {
 		return err
 	}
 	if !isAdmin {
-		return errors.New("only admins can update group settings")
+		return errors.New("you don't have permission to update group settings")
 	}
 
-	// Update settings
-	err = u.groupRepo.UpdateGroupSettings(ctx, groupID, settings)
+	// Update group settings
+	err = u.groupRepo.UpdateGroupSettings(ctx, groupID, req)
 	if err != nil {
 		return err
 	}
 
 	// Log activity
 	u.logActivity(ctx, groupID, userID, "group_settings_updated", nil, map[string]interface{}{
-		"settings": settings,
+		"settings": req,
 	})
 
-	// Broadcast update
-	u.broadcastGroupUpdate(groupID, "group_settings_updated", settings)
+	// Broadcast settings update
+	u.broadcastGroupUpdate(groupID, "group_settings_updated", req)
 
 	return nil
 }
+
+// ========== Member Management ==========
 
 func (u *GroupUsecase) AddMembers(ctx context.Context, groupIDStr, userIDStr string, req *entities.AddMembersRequest) (*entities.AddMembersResult, error) {
 	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
@@ -155,11 +152,11 @@ func (u *GroupUsecase) AddMembers(ctx context.Context, groupIDStr, userIDStr str
 	}
 
 	for _, newUserID := range req.UserIDs {
-		// Check if user exists
+		// Get user info
 		user, err := u.userRepo.GetByID(ctx, newUserID)
 		if err != nil {
 			result.FailedToAdd = append(result.FailedToAdd, entities.FailedMember{
-				UserID: newUserID,
+				UserID: newUserID.Hex(),
 				Reason: "user not found",
 			})
 			continue
@@ -169,14 +166,14 @@ func (u *GroupUsecase) AddMembers(ctx context.Context, groupIDStr, userIDStr str
 		isMember, err := u.groupRepo.IsGroupMember(ctx, groupID, newUserID)
 		if err != nil {
 			result.FailedToAdd = append(result.FailedToAdd, entities.FailedMember{
-				UserID: newUserID,
+				UserID: newUserID.Hex(),
 				Reason: "error checking membership",
 			})
 			continue
 		}
 		if isMember {
 			result.FailedToAdd = append(result.FailedToAdd, entities.FailedMember{
-				UserID: newUserID,
+				UserID: newUserID.Hex(),
 				Reason: "already a member",
 			})
 			continue
@@ -186,7 +183,7 @@ func (u *GroupUsecase) AddMembers(ctx context.Context, groupIDStr, userIDStr str
 		err = u.groupRepo.AddMember(ctx, groupID, newUserID, userID, entities.RoleMember)
 		if err != nil {
 			result.FailedToAdd = append(result.FailedToAdd, entities.FailedMember{
-				UserID: newUserID,
+				UserID: newUserID.Hex(),
 				Reason: "failed to add member",
 			})
 			continue
@@ -348,6 +345,8 @@ func (u *GroupUsecase) ChangeRole(ctx context.Context, groupIDStr, memberIDStr, 
 	return nil
 }
 
+// ========== Invitation Management ==========
+
 func (u *GroupUsecase) CreateInvite(ctx context.Context, groupIDStr, userIDStr string, req *entities.CreateInviteRequest) (*entities.GroupInvite, error) {
 	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
 	if err != nil {
@@ -388,6 +387,77 @@ func (u *GroupUsecase) CreateInvite(ctx context.Context, groupIDStr, userIDStr s
 	})
 
 	return invite, nil
+}
+
+func (u *GroupUsecase) GetGroupInvites(ctx context.Context, groupIDStr, userIDStr string) ([]*entities.GroupInvite, error) {
+	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
+	if err != nil {
+		return nil, errors.New("invalid group ID")
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		return nil, errors.New("invalid user ID")
+	}
+
+	// Check if user can manage invites (admin or owner)
+	isAdmin, err := u.groupRepo.IsGroupAdmin(ctx, groupID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isAdmin {
+		return nil, errors.New("you don't have permission to view group invites")
+	}
+
+	return u.groupRepo.GetGroupInvites(ctx, groupID)
+}
+
+func (u *GroupUsecase) RevokeInvite(ctx context.Context, groupIDStr, inviteIDStr, userIDStr string) error {
+	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
+	if err != nil {
+		return errors.New("invalid group ID")
+	}
+
+	inviteID, err := primitive.ObjectIDFromHex(inviteIDStr)
+	if err != nil {
+		return errors.New("invalid invite ID")
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		return errors.New("invalid user ID")
+	}
+
+	// Check if user can manage invites (admin or owner)
+	isAdmin, err := u.groupRepo.IsGroupAdmin(ctx, groupID, userID)
+	if err != nil {
+		return err
+	}
+	if !isAdmin {
+		return errors.New("you don't have permission to revoke invites")
+	}
+
+	// Get invite to verify it belongs to this group
+	invite, err := u.groupRepo.GetInviteByID(ctx, inviteID)
+	if err != nil {
+		return errors.New("invite not found")
+	}
+	if invite.GroupID != groupID {
+		return errors.New("invite does not belong to this group")
+	}
+
+	// Revoke invite
+	err = u.groupRepo.RevokeInvite(ctx, inviteID)
+	if err != nil {
+		return err
+	}
+
+	// Log activity
+	u.logActivity(ctx, groupID, userID, "invite_revoked", nil, map[string]interface{}{
+		"invite_id": inviteID,
+	})
+
+	return nil
 }
 
 func (u *GroupUsecase) JoinViaInvite(ctx context.Context, userIDStr, inviteCode string) error {
@@ -446,6 +516,55 @@ func (u *GroupUsecase) JoinViaInvite(ctx context.Context, userIDStr, inviteCode 
 	return nil
 }
 
+func (u *GroupUsecase) GetInviteInfo(ctx context.Context, inviteCode string) (*entities.GroupInviteInfo, error) {
+	// Get invite by code
+	invite, err := u.groupRepo.GetInviteByCode(ctx, inviteCode)
+	if err != nil {
+		return nil, errors.New("invalid invite code")
+	}
+
+	// Check if invite is still valid
+	if invite.ExpiresAt != nil && time.Now().After(*invite.ExpiresAt) {
+		return nil, errors.New("invite has expired")
+	}
+
+	if !invite.IsActive {
+		return nil, errors.New("invite is no longer active")
+	}
+
+	if invite.MaxUses > 0 && invite.CurrentUses >= invite.MaxUses {
+		return nil, errors.New("invite has reached maximum uses")
+	}
+
+	// Get group info
+	groupInfo, err := u.groupRepo.GetGroupInfo(ctx, invite.GroupID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get invite creator info
+	creator, err := u.userRepo.GetByID(ctx, invite.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+
+	return &entities.GroupInviteInfo{
+		GroupID:     groupInfo.ID.Hex(),
+		Name:        groupInfo.Name,
+		Description: groupInfo.Description,
+		Avatar:      groupInfo.Avatar,
+		MemberCount: len(groupInfo.Participants),
+		InviteInfo: entities.InviteDetails{
+			InviteID:         invite.ID.Hex(),
+			ExpiresAt:        invite.ExpiresAt,
+			RequiresApproval: invite.RequiresApproval,
+			CreatedBy:        *creator,
+		},
+	}, nil
+}
+
+// ========== Group Actions ==========
+
 func (u *GroupUsecase) PinGroup(ctx context.Context, groupIDStr, userIDStr string) error {
 	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
 	if err != nil {
@@ -467,6 +586,29 @@ func (u *GroupUsecase) PinGroup(ctx context.Context, groupIDStr, userIDStr strin
 	}
 
 	return u.groupRepo.PinGroup(ctx, groupID, userID)
+}
+
+func (u *GroupUsecase) UnpinGroup(ctx context.Context, groupIDStr, userIDStr string) error {
+	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
+	if err != nil {
+		return errors.New("invalid group ID")
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		return errors.New("invalid user ID")
+	}
+
+	// Check if user is a member
+	isMember, err := u.groupRepo.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return errors.New("user is not a member of this group")
+	}
+
+	return u.groupRepo.UnpinGroup(ctx, groupID, userID)
 }
 
 func (u *GroupUsecase) MuteGroup(ctx context.Context, groupIDStr, userIDStr string, duration int) error {
@@ -492,7 +634,77 @@ func (u *GroupUsecase) MuteGroup(ctx context.Context, groupIDStr, userIDStr stri
 	return u.groupRepo.MuteGroup(ctx, groupID, userID, duration)
 }
 
-// Helper methods for permission checks
+func (u *GroupUsecase) UnmuteGroup(ctx context.Context, groupIDStr, userIDStr string) error {
+	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
+	if err != nil {
+		return errors.New("invalid group ID")
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		return errors.New("invalid user ID")
+	}
+
+	// Check if user is a member
+	isMember, err := u.groupRepo.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return errors.New("user is not a member of this group")
+	}
+
+	return u.groupRepo.UnmuteGroup(ctx, groupID, userID)
+}
+
+func (u *GroupUsecase) ArchiveGroup(ctx context.Context, groupIDStr, userIDStr string) error {
+	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
+	if err != nil {
+		return errors.New("invalid group ID")
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		return errors.New("invalid user ID")
+	}
+
+	// Check if user is a member
+	isMember, err := u.groupRepo.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return errors.New("user is not a member of this group")
+	}
+
+	return u.groupRepo.ArchiveGroup(ctx, groupID, userID)
+}
+
+func (u *GroupUsecase) UnarchiveGroup(ctx context.Context, groupIDStr, userIDStr string) error {
+	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
+	if err != nil {
+		return errors.New("invalid group ID")
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		return errors.New("invalid user ID")
+	}
+
+	// Check if user is a member
+	isMember, err := u.groupRepo.IsGroupMember(ctx, groupID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return errors.New("user is not a member of this group")
+	}
+
+	return u.groupRepo.UnarchiveGroup(ctx, groupID, userID)
+}
+
+// ========== Helper Methods for Permission Checks ==========
+
 func (u *GroupUsecase) canEditGroupInfo(ctx context.Context, groupID, userID primitive.ObjectID) (bool, error) {
 	// Get group settings
 	groupInfo, err := u.groupRepo.GetGroupInfo(ctx, groupID)

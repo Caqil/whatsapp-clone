@@ -21,6 +21,7 @@ import type { ChatWithUsers } from "@/types/chat";
 
 interface ChatHeaderProps {
   chat: ChatWithUsers;
+  currentUserId?: string; // Add current user ID to check admin/owner status
   onCall?: () => void;
   onVideoCall?: () => void;
   onSearch?: () => void;
@@ -30,6 +31,7 @@ interface ChatHeaderProps {
 
 export function ChatHeader({
   chat,
+  currentUserId,
   onCall,
   onVideoCall,
   onSearch,
@@ -46,9 +48,13 @@ export function ChatHeader({
     ? chat.participants.filter((p) => p.isOnline).length
     : 0;
 
-  // Check if current user is admin/owner
-  const isAdmin = chat.admins?.includes(chat.createdBy) || false;
-  const isOwner = chat.owner === chat.createdBy;
+  // Check if current user is admin/owner (only for groups)
+  const isAdmin =
+    isGroup && currentUserId
+      ? (chat as any).admins?.includes(currentUserId) || false
+      : false;
+  const isOwner =
+    isGroup && currentUserId ? (chat as any).owner === currentUserId : false;
 
   return (
     <div className="flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

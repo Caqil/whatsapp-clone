@@ -55,7 +55,7 @@ export function useChat() {
   const { user } = useAuth();
   const { socket, isConnected } = useSocket();
   const abortControllerRef = useRef<AbortController | null>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | undefined>();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   // Helper function to update state
   const updateState = useCallback((updates: Partial<ChatState>) => {
@@ -603,26 +603,35 @@ export function useChat() {
   }, [updateState]);
 
   // ========== Search ==========
-
-  const searchMessages = useCallback(async (query: string): Promise<MessageWithUser[]> => {
-    if (!state.currentChatId || !query.trim()) return [];
+const searchMessages = useCallback(async (query: string): Promise<MessageWithUser[]> => {
+  if (!state.currentChatId || !query.trim()) return [];
+  
+  try {
+    // Use messageApi.search() instead of messageApi.searchMessages()
+    const messageResponses = await messageApi.search(state.currentChatId, query, 50);
     
-    try {
-      const messages = await messageApi.searchMessages(state.currentChatId, query, 50);
-      const messagesWithUser = messages.map(msg => ({
-        ...msg,
-        senderName: msg.senderId === user?.id ? (user?.username || user?.firstName || 'You') : 'Unknown',
-        isOwn: msg.senderId === user?.id,
-      }));
+    // Convert MessageResponse[] to MessageWithUser[]
+    const messagesWithUser = messageResponses.map(msgResponse => {
+      const message = msgResponse.message || msgResponse; // Handle both formats
       
-      updateState({ searchResults: messagesWithUser });
-      return messagesWithUser;
-    } catch (error) {
-      console.error('Error searching messages:', error);
-      return [];
-    }
-  }, [state.currentChatId, user, updateState]);
-
+      return {
+        ...message,
+        senderName: msgResponse.senderName || 
+                   (message.senderId === user?.id ? (user?.username || user?.firstName || 'You') : 'Unknown'),
+        isOwn: message.senderId === user?.id,
+        replyToMessage: msgResponse.replyToMessage,
+      } as MessageWithUser;
+    });
+    
+    updateState({ searchResults: messagesWithUser });
+    
+    return messagesWithUser;
+  } catch (error) {
+    console.error('Error searching messages:', error);
+    updateState({ searchResults: [] });
+    return [];
+  }
+}, [state.currentChatId, user, updateState]);
   const clearSearchResults = useCallback(() => {
     updateState({ searchResults: [] });
   }, [updateState]);

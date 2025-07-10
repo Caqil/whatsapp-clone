@@ -1,7 +1,7 @@
 // src/hooks/use-messages.ts
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { 
   Message,
   MessageWithUser,
@@ -16,9 +16,8 @@ import type {
   MessageListState,
   MessageResponse
 } from '@/types/message';
-import type { ApiResponse, PaginationParams, UploadResult } from '@/types/api';
+import type { UploadResult } from '@/types/api';
 import { messageApi, fileApi } from '@/lib/api';
-import { useSocket } from './use-socket';
 import { useAuth } from './use-auth';
 import { toast } from 'sonner';
 
@@ -64,7 +63,7 @@ interface UseMessagesActions {
   clearSearchResults: () => void;
   getMediaMessages: (chatId: string, mediaType?: MessageType) => Promise<MessageWithUser[]>;
   
-  // Typing Indicators
+  // Typing Indicators (simplified - no WebSocket dependency)
   startTyping: (chatId: string) => void;
   stopTyping: (chatId: string) => void;
   
@@ -95,9 +94,8 @@ const INITIAL_STATE: UseMessagesState = {
 export function useMessages(): UseMessagesState & UseMessagesActions {
   const [state, setState] = useState<UseMessagesState>(INITIAL_STATE);
   const { user } = useAuth();
-  const { socket, isConnected } = useSocket();
   
-  // Refs for managing timers and state
+  // Refs for managing timers
   const typingTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
 
@@ -131,9 +129,8 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
     
     return {
       ...message,
-      sender: message.senderId || { id: message.senderId } as any, // Will be populated by backend
       isOwn: message.senderId === user?.id,
-      senderName: msgResponse.senderName|| 'Unknown',
+      senderName: msgResponse.senderName || 'Unknown',
     };
   }, [user?.id]);
 
@@ -141,12 +138,11 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
 
   const sendMessage = useCallback(async (request: SendMessageRequest): Promise<Message> => {
     try {
-      const message = await messageApi.send(request);
+      const message = await messageApi.sendMessage(request);
       
       // Add optimistic message to state
       const optimisticMessage: MessageWithUser = {
         ...message,
-        sender: user!,
         isOwn: true,
         senderName: user?.username || 'You',
       };
@@ -189,13 +185,27 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
         return { ...prev, uploadProgress: newProgress };
       });
 
-      // Use the fileApi.sendMedia method which handles upload + message creation
-      const message = await fileApi.sendMedia(file, chatId, content);
+      // First upload the file
+      const uploadResult: UploadResult = await fileApi.upload(file);
+      
+      // Then send the message with file info
+      const messageType = getMessageTypeFromFile(file);
+      const message = await messageApi.sendMessage({
+        chatId,
+        type: messageType,
+        content: content || '',
+        mediaUrl: uploadResult.fileUrl,
+        mediaType: uploadResult.mediaType,
+        fileName: uploadResult.fileName,
+        fileSize: uploadResult.fileSize,
+        duration: uploadResult.duration,
+        dimensions: uploadResult.dimensions,
+        replyToId,
+      });
 
       // Add message to state
       const messageWithUser: MessageWithUser = {
         ...message,
-        sender: user!,
         isOwn: true,
         senderName: user?.username || 'You',
       };
@@ -221,7 +231,7 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
 
   const editMessage = useCallback(async (messageId: string, content: string) => {
     try {
-      await messageApi.edit(messageId, content);
+      await messageApi.editMessage(messageId, content);
       
       // Update message in state
       const message = state.messages.get(messageId);
@@ -243,7 +253,7 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
 
   const deleteMessage = useCallback(async (messageId: string, deleteForEveryone: boolean = false) => {
     try {
-      await messageApi.delete({ messageId, deleteForMe: !deleteForEveryone });
+      await messageApi.deleteMessage({ messageId, deleteForMe: !deleteForEveryone });
       
       if (deleteForEveryone) {
         removeMessage(messageId);
@@ -269,7 +279,7 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
 
   const forwardMessages = useCallback(async (messageIds: string[], toChatIds: string[]) => {
     try {
-      await messageApi.forward({ messageIds, toChatIds });
+      await messageApi.forwardMessages({ messageIds, toChatIds });
       toast.success(`Message${messageIds.length > 1 ? 's' : ''} forwarded to ${toChatIds.length} chat${toChatIds.length > 1 ? 's' : ''}`);
     } catch (error) {
       console.error('Error forwarding messages:', error);
@@ -426,10 +436,16 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
 
   const removeReaction = useCallback(async (messageId: string) => {
     try {
-      await messageApi.removeReaction(messageId);
+      // Find the user's reaction to remove
+      const message = state.messages.get(messageId);
+      const userReaction = message?.reactions.find(r => r.userId === user?.id);
+      if (!userReaction) {
+        toast.error('No reaction to remove');
+        return;
+      }
+      await messageApi.removeReaction(messageId, userReaction.reaction);
       
       // Update message reactions locally
-      const message = state.messages.get(messageId);
       if (message && user) {
         const updatedReactions = message.reactions.filter(r => r.userId !== user.id);
         
@@ -493,7 +509,7 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
   const getMediaMessages = useCallback(async (chatId: string, mediaType?: MessageType): Promise<MessageWithUser[]> => {
     try {
       const type = mediaType || 'image'; // Default to image if not specified
-      const messageResponses = await messageApi.getMedia(chatId, type);
+      const messageResponses = await messageApi.getMediaMessages(chatId, type);
       return messageResponses.map(convertMessageResponse);
     } catch (error) {
       console.error('Error getting media messages:', error);
@@ -501,12 +517,9 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
     }
   }, [convertMessageResponse]);
 
-  // ========== TYPING INDICATORS ==========
+  // ========== TYPING INDICATORS (SIMPLIFIED) ==========
 
   const startTyping = useCallback((chatId: string) => {
-    if (!socket || !isConnected) return;
-    
-    socket.emit('typing_start', { chatId });
     updateState({ isTyping: true });
     
     // Clear existing timeout
@@ -518,19 +531,16 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
     typingTimeoutRef.current = setTimeout(() => {
       stopTyping(chatId);
     }, 3000);
-  }, [socket, isConnected, updateState]);
+  }, [updateState]);
 
   const stopTyping = useCallback((chatId: string) => {
-    if (!socket || !isConnected) return;
-    
-    socket.emit('typing_stop', { chatId });
     updateState({ isTyping: false });
     
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = undefined;
     }
-  }, [socket, isConnected, updateState]);
+  }, [updateState]);
 
   // ========== UTILITIES ==========
 
@@ -620,94 +630,6 @@ export function useMessages(): UseMessagesState & UseMessagesActions {
       toast.error('Failed to resend message');
     }
   }, [state.messages, removeMessage, sendMessage]);
-
-  // ========== WEBSOCKET EVENT HANDLERS ==========
-
-  useEffect(() => {
-    if (!socket || !isConnected) return;
-
-    // Handle new messages
-    const handleNewMessage = (payload: any) => {
-      const message: MessageWithUser = {
-        ...payload.message,
-        sender: payload.sender || { id: payload.message.senderId },
-        isOwn: payload.message.senderId === user?.id,
-        senderName: payload.senderName || payload.sender?.username || 'Unknown',
-      };
-      addOrUpdateMessage(message);
-    };
-
-    // Handle message status updates
-    const handleMessageStatus = (payload: any) => {
-      const message = state.messages.get(payload.messageId);
-      if (message) {
-        addOrUpdateMessage({
-          ...message,
-          status: payload.status,
-        });
-      }
-    };
-
-    // Handle typing indicators
-    const handleTypingStart = (payload: any) => {
-      if (payload.userId !== user?.id) {
-        setState(prev => {
-          const newTypingUsers = new Set(prev.typingUsers);
-          newTypingUsers.add(payload.userId);
-          return { ...prev, typingUsers: newTypingUsers };
-        });
-      }
-    };
-
-    const handleTypingStop = (payload: any) => {
-      if (payload.userId !== user?.id) {
-        setState(prev => {
-          const newTypingUsers = new Set(prev.typingUsers);
-          newTypingUsers.delete(payload.userId);
-          return { ...prev, typingUsers: newTypingUsers };
-        });
-      }
-    };
-
-    // Handle message reactions
-    const handleMessageReaction = (payload: any) => {
-      const message = state.messages.get(payload.messageId);
-      if (message) {
-        let updatedReactions = [...message.reactions];
-        
-        if (payload.action === 'add') {
-          updatedReactions = updatedReactions.filter(r => r.userId !== payload.userId);
-          updatedReactions.push({
-            userId: payload.userId,
-            reaction: payload.reaction,
-            addedAt: payload.timestamp,
-          });
-        } else {
-          updatedReactions = updatedReactions.filter(r => r.userId !== payload.userId);
-        }
-        
-        addOrUpdateMessage({
-          ...message,
-          reactions: updatedReactions,
-        });
-      }
-    };
-
-    // Register event listeners
-    socket.on('new_message', handleNewMessage);
-    socket.on('message_status', handleMessageStatus);
-    socket.on('typing_start', handleTypingStart);
-    socket.on('typing_stop', handleTypingStop);
-    socket.on('message_reaction', handleMessageReaction);
-
-    return () => {
-      socket.off('new_message', handleNewMessage);
-      socket.off('message_status', handleMessageStatus);
-      socket.off('typing_start', handleTypingStart);
-      socket.off('typing_stop', handleTypingStop);
-      socket.off('message_reaction', handleMessageReaction);
-    };
-  }, [socket, isConnected, user?.id, state.messages, addOrUpdateMessage]);
 
   // Cleanup on unmount
   useEffect(() => {

@@ -1,3 +1,4 @@
+// internal/interfaces/handlers/group_handler.go
 package handlers
 
 import (
@@ -19,7 +20,8 @@ func NewGroupHandler(groupUsecase *usecases.GroupUsecase) *GroupHandler {
 	}
 }
 
-// Group Information
+// ========== Group Information ==========
+
 func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
 	groupID := c.Param("groupId")
 	userID := c.GetString("user_id")
@@ -71,7 +73,8 @@ func (h *GroupHandler) UpdateGroupSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Group settings updated successfully"})
 }
 
-// Member Management
+// ========== Member Management ==========
+
 func (h *GroupHandler) AddMembers(c *gin.Context) {
 	groupID := c.Param("groupId")
 	userID := c.GetString("user_id")
@@ -138,7 +141,8 @@ func (h *GroupHandler) ChangeRole(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Role changed successfully"})
 }
 
-// Group Invitations
+// ========== Group Invitations ==========
+
 func (h *GroupHandler) CreateInvite(c *gin.Context) {
 	groupID := c.Param("groupId")
 	userID := c.GetString("user_id")
@@ -156,16 +160,16 @@ func (h *GroupHandler) CreateInvite(c *gin.Context) {
 	}
 
 	// Add invite link to response
-	inviteLink := c.Request.Host + "/invite/" + invite.InviteCode
+	inviteLink := "https://" + c.Request.Host + "/invite/" + invite.InviteCode
 	response := gin.H{
-		"inviteId":         invite.ID,
+		"inviteId":         invite.ID.Hex(),
 		"inviteCode":       invite.InviteCode,
 		"inviteLink":       inviteLink,
 		"expiresAt":        invite.ExpiresAt,
 		"maxUses":          invite.MaxUses,
 		"currentUses":      invite.CurrentUses,
 		"requiresApproval": invite.RequiresApproval,
-		"createdBy":        invite.CreatedBy,
+		"createdBy":        invite.CreatedBy.Hex(),
 		"createdAt":        invite.CreatedAt,
 	}
 
@@ -176,20 +180,20 @@ func (h *GroupHandler) GetGroupInvites(c *gin.Context) {
 	groupID := c.Param("groupId")
 	userID := c.GetString("user_id")
 
-	// First check if user can manage invites
-	groupIDObj, err := primitive.ObjectIDFromHex(groupID)
+	// Validate IDs
+	_, err := primitive.ObjectIDFromHex(groupID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid group ID"})
 		return
 	}
 
-	userIDObj, err := primitive.ObjectIDFromHex(userID)
+	_, err = primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
 	}
 
-	// Get invites (this should be implemented in the usecase)
+	// Get invites
 	invites, err := h.groupUsecase.GetGroupInvites(c.Request.Context(), groupID, userID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -243,7 +247,8 @@ func (h *GroupHandler) GetInviteInfo(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": inviteInfo})
 }
 
-// Group Actions
+// ========== Group Actions ==========
+
 func (h *GroupHandler) PinGroup(c *gin.Context) {
 	groupID := c.Param("groupId")
 	userID := c.GetString("user_id")

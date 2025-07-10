@@ -15,12 +15,14 @@ import {
   CheckCheck,
 } from "lucide-react";
 import type { ChatWithUsers } from "@/types/chat";
+import type { MessageWithUser } from "@/types/message";
 
 interface ChatListProps {
   chats: ChatWithUsers[];
   selectedChatId?: string | null;
   onChatSelect?: (chat: ChatWithUsers) => void;
   className?: string;
+  currentUserId?: string; // Add current user ID for admin/owner checks
 }
 
 export function ChatList({
@@ -28,6 +30,7 @@ export function ChatList({
   selectedChatId,
   onChatSelect,
   className,
+  currentUserId,
 }: ChatListProps) {
   const formatLastMessageTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -46,11 +49,20 @@ export function ChatList({
     if (!chat.lastMessage) return "No messages yet";
 
     const message = chat.lastMessage;
-    const isOwn = message.senderId === chat.createdBy; // Simplified check
+    // Check if it's a MessageWithUser (has senderName) or base Message
+    const isMessageWithUser = "senderName" in message;
+    const isOwn = message.senderId === currentUserId;
 
     let preview = "";
-    if (isOwn) preview = "You: ";
-    else if (chat.type === "group") preview = `${message.senderName}: `;
+    if (isOwn) {
+      preview = "You: ";
+    } else if (chat.type === "group") {
+      // Use senderName if available, otherwise fallback to "Someone"
+      const senderName = isMessageWithUser
+        ? (message as MessageWithUser).senderName
+        : "Someone";
+      preview = `${senderName}: `;
+    }
 
     switch (message.type) {
       case "text":
@@ -72,7 +84,7 @@ export function ChatList({
     if (!chat.lastMessage) return null;
 
     const message = chat.lastMessage;
-    const isOwn = message.senderId === chat.createdBy; // Simplified check
+    const isOwn = message.senderId === currentUserId;
 
     if (!isOwn) return null;
 
@@ -107,6 +119,16 @@ export function ChatList({
         const otherParticipant = isGroup
           ? null
           : chat.participants.find((p) => p.id !== chat.createdBy);
+
+        // Check admin/owner status for groups
+        const isOwner =
+          isGroup && currentUserId
+            ? (chat as any).owner === currentUserId
+            : false;
+        const isAdmin =
+          isGroup && currentUserId
+            ? (chat as any).admins?.includes(currentUserId) || false
+            : false;
 
         return (
           <div
@@ -158,13 +180,10 @@ export function ChatList({
                   {isGroup && (
                     <div className="flex items-center gap-1">
                       <Users className="h-3 w-3 text-muted-foreground" />
-                      {chat.owner === chat.createdBy && (
-                        <Crown className="h-3 w-3 text-yellow-500" />
+                      {isOwner && <Crown className="h-3 w-3 text-yellow-500" />}
+                      {isAdmin && !isOwner && (
+                        <Shield className="h-3 w-3 text-blue-500" />
                       )}
-                      {chat.admins?.includes(chat.createdBy) &&
-                        chat.owner !== chat.createdBy && (
-                          <Shield className="h-3 w-3 text-blue-500" />
-                        )}
                     </div>
                   )}
 

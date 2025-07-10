@@ -170,13 +170,15 @@ export default function ChatPage() {
   return (
     <div className="flex-1 flex flex-col">
       {/* Chat Header */}
-      <ChatHeader
-        chat={currentChat}
-        onCall={() => toast.info("Voice call feature coming soon!")}
-        onVideoCall={() => toast.info("Video call feature coming soon!")}
-        onSearch={() => toast.info("Search feature coming soon!")}
-        onChatInfo={() => toast.info("Chat info feature coming soon!")}
-      />
+      {currentChat && (
+        <ChatHeader
+          chat={currentChat}
+          onCall={() => toast.info("Voice call feature coming soon!")}
+          onVideoCall={() => toast.info("Video call feature coming soon!")}
+          onSearch={() => toast.info("Search feature coming soon!")}
+          onChatInfo={() => toast.info("Chat info feature coming soon!")}
+        />
+      )}
 
       {/* Messages */}
       <MessageList

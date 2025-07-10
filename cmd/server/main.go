@@ -4,7 +4,7 @@ package main
 import (
 	"bro-chat/internal/infrastructure/config"
 	"bro-chat/internal/infrastructure/database"
-	"bro-chat/internal/infrastructure/database/repositories"
+	dbRepo "bro-chat/internal/infrastructure/database/repositories"
 	mongoRepo "bro-chat/internal/infrastructure/database/repositories"
 	"bro-chat/internal/interfaces/handlers"
 	"bro-chat/internal/interfaces/middleware"
@@ -26,12 +26,12 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to connect to MongoDB:", err)
 	}
-
+	userRepository := dbRepo.NewUserRepository(db)
 	// Initialize repositories
 	userRepo := mongoRepo.NewUserRepository(db)
 	chatRepo := mongoRepo.NewChatRepository(db)
 	messageRepo := mongoRepo.NewMessageRepository(db)
-	groupRepo := repositories.NewGroupRepository(db)
+	groupRepository := dbRepo.NewGroupRepository(db)
 	// Initialize new auth repositories
 	magicLinkRepo := mongoRepo.NewMagicLinkRepository(db)
 	qrCodeRepo := mongoRepo.NewQRCodeRepository(db)
@@ -49,7 +49,7 @@ func main() {
 	userUsecase := usecases.NewUserUsecase(userRepo)
 	chatUsecase := usecases.NewChatUsecase(chatRepo, userRepo)
 	messageUsecase := usecases.NewMessageUsecase(messageRepo, chatRepo, userRepo, hub)
-	groupUsecase := usecases.NewGroupUsecase(groupRepo, userRepo, chatRepo, hub)
+	groupUsecase := usecases.NewGroupUsecase(groupRepository, userRepository)
 	// Initialize new auth usecase
 	authUsecase := usecases.NewAuthUsecase(
 		userRepo,
@@ -141,6 +141,21 @@ func main() {
 			groups.POST("/:groupId/unarchive", groupHandler.UnarchiveGroup)
 		}
 
+		users := api.Group("/users")
+		{
+			users.GET("/profile", userHandler.GetProfile)
+			users.PUT("/profile", userHandler.UpdateProfile)
+			users.GET("/search", userHandler.SearchUsers)
+		}
+
+		// Chat routes
+		chats := api.Group("/chats")
+		{
+			chats.POST("", chatHandler.CreateChat)
+			chats.GET("", chatHandler.GetUserChats)
+			chats.GET("/:chatId", chatHandler.GetChat)
+		}
+
 		// Message routes
 		messages := api.Group("/messages")
 		{
@@ -175,7 +190,7 @@ func main() {
 		// WebSocket route
 		api.GET("/ws", wsHandler.HandleWebSocket)
 	}
-	r.GET("/api/groups/invites/:inviteCode/info", groupHandler.GetInviteInfo)
+
 	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
