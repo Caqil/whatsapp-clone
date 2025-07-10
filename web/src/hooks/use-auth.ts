@@ -19,7 +19,7 @@ import type {
   AuthError,
   AuthErrorCode
 } from '@/types/auth';
-import { authApi } from '@/lib/api';
+import { authApi, userApi } from '@/lib/api';
 import { authManager, authUtils } from '@/lib/auth';
 import { 
   getStoredTokens, 
@@ -171,7 +171,7 @@ export function useAuth(): UseAuthReturn {
           } else {
             // Token exists but no user data, fetch from API
             try {
-              const user = await authApi.getUserProfile?.() as User;
+              const user = await userApi.getProfile?.() as User;
               setStoredUser(user);
               updateState({
                 user,

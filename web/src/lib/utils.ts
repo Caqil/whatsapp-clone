@@ -1,4 +1,3 @@
-
 // src/lib/utils.ts
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -73,24 +72,9 @@ export function formatLastSeen(date: string | Date): string {
 }
 
 /**
- * Format duration in seconds to MM:SS or HH:MM:SS
+ * Format distance to now (missing function that was causing the error)
  */
-export function formatDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  } else {
-    return `${minutes}:${secs.toString().padStart(2, '0')}`;
-  }
-}
-
-/**
- * Get relative time string
- */
-export function getRelativeTime(date: string | Date): string {
+export function formatDistanceToNow(date: string | Date): string {
   const now = new Date();
   const target = new Date(date);
   const diffInMs = now.getTime() - target.getTime();
@@ -109,127 +93,78 @@ export function getRelativeTime(date: string | Date): string {
   const diffInYears = Math.floor(diffInDays / 365);
 
   if (diffInSeconds < 60) return 'just now';
-  if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-  if (diffInHours < 24) return `${diffInHours}h ago`;
-  if (diffInDays < 7) return `${diffInDays}d ago`;
-  if (diffInWeeks < 4) return `${diffInWeeks}w ago`;
-  if (diffInMonths < 12) return `${diffInMonths}mo ago`;
-  return `${diffInYears}y ago`;
-}
-
-// ========== File Utilities ==========
-
-/**
- * Format file size to human readable string
- */
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const size = bytes / Math.pow(1024, i);
-  
-  return `${size.toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`;
+  if (diffInMinutes === 1) return '1 min ago';
+  if (diffInMinutes < 60) return `${diffInMinutes} mins ago`;
+  if (diffInHours === 1) return '1 hour ago';
+  if (diffInHours < 24) return `${diffInHours} hours ago`;
+  if (diffInDays === 1) return '1 day ago';
+  if (diffInDays < 7) return `${diffInDays} days ago`;
+  if (diffInWeeks === 1) return '1 week ago';
+  if (diffInWeeks < 4) return `${diffInWeeks} weeks ago`;
+  if (diffInMonths === 1) return '1 month ago';
+  if (diffInMonths < 12) return `${diffInMonths} months ago`;
+  if (diffInYears === 1) return '1 year ago';
+  return `${diffInYears} years ago`;
 }
 
 /**
- * Get file extension from filename
+ * Format duration in seconds to MM:SS or HH:MM:SS
  */
-export function getFileExtension(filename: string): string {
-  return filename.split('.').pop()?.toLowerCase() || '';
-}
+export function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
 
-/**
- * Get file type category
- */
-export function getFileTypeCategory(filename: string | File): 'image' | 'video' | 'audio' | 'document' | 'unknown' {
-  let extension: string;
-  
-  if (typeof filename === 'string') {
-    extension = getFileExtension(filename);
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   } else {
-    const mimeType = filename.type;
-    if (mimeType.startsWith('image/')) return 'image';
-    if (mimeType.startsWith('video/')) return 'video';
-    if (mimeType.startsWith('audio/')) return 'audio';
-    if (mimeType.includes('document') || mimeType.includes('pdf') || mimeType.includes('text')) return 'document';
-    extension = getFileExtension(filename.name);
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  }
+}
+
+/**
+ * Get relative time string (shorter format)
+ */
+export function getRelativeTime(date: string | Date): string {
+  const now = new Date();
+  const target = new Date(date);
+  const diffInMs = now.getTime() - target.getTime();
+  
+  // Future dates
+  if (diffInMs < 0) {
+    return 'future';
   }
 
-  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
-  const videoExts = ['mp4', 'avi', 'mov', 'mkv', 'webm', 'flv', 'wmv'];
-  const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'wma'];
-  const docExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'csv'];
+  const diffInSeconds = Math.floor(diffInMs / 1000);
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  const diffInDays = Math.floor(diffInHours / 24);
+  const diffInWeeks = Math.floor(diffInDays / 7);
+  const diffInMonths = Math.floor(diffInDays / 30);
+  const diffInYears = Math.floor(diffInDays / 365);
 
-  if (imageExts.includes(extension)) return 'image';
-  if (videoExts.includes(extension)) return 'video';
-  if (audioExts.includes(extension)) return 'audio';
-  if (docExts.includes(extension)) return 'document';
-  
-  return 'unknown';
-}
-
-/**
- * Validate file type
- */
-export function isValidFileType(file: File, allowedTypes: string[]): boolean {
-  return allowedTypes.some(type => {
-    if (type.includes('/*')) {
-      // Wildcard type like 'image/*'
-      const category = type.split('/')[0];
-      return file.type.startsWith(category + '/');
-    }
-    return file.type === type;
-  });
-}
-
-/**
- * Validate file size
- */
-export function isValidFileSize(file: File, maxSizeBytes: number): boolean {
-  return file.size <= maxSizeBytes;
-}
-
-/**
- * Create file preview URL
- */
-export function createFilePreview(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith('image/')) {
-      reject(new Error('File is not an image'));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      resolve(e.target?.result as string);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+  if (diffInSeconds < 60) return 'now';
+  if (diffInMinutes < 60) return `${diffInMinutes}m`;
+  if (diffInHours < 24) return `${diffInHours}h`;
+  if (diffInDays < 7) return `${diffInDays}d`;
+  if (diffInWeeks < 4) return `${diffInWeeks}w`;
+  if (diffInMonths < 12) return `${diffInMonths}mo`;
+  return `${diffInYears}y`;
 }
 
 // ========== String Utilities ==========
 
 /**
- * Truncate text with ellipsis
- */
-export function truncateText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength) + '...';
-}
-
-/**
- * Capitalize first letter
+ * Capitalize first letter of string
  */
 export function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
 }
 
 /**
- * Convert to title case
+ * Capitalize all words in string
  */
-export function toTitleCase(text: string): string {
+export function capitalizeWords(text: string): string {
   return text.split(' ').map(word => capitalize(word)).join(' ');
 }
 
@@ -237,12 +172,23 @@ export function toTitleCase(text: string): string {
  * Generate initials from name
  */
 export function getInitials(name: string): string {
+  if (!name || typeof name !== 'string') return 'U';
+  
   return name
     .split(' ')
+    .filter(word => word.length > 0)
     .map(word => word.charAt(0))
     .join('')
     .toUpperCase()
     .slice(0, 2);
+}
+
+/**
+ * Truncate string to specified length
+ */
+export function truncate(text: string, length: number, suffix: string = '...'): string {
+  if (text.length <= length) return text;
+  return text.slice(0, length - suffix.length) + suffix;
 }
 
 /**
@@ -278,6 +224,57 @@ export function generateRandomString(length: number): string {
  */
 export function generateUniqueId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+/**
+ * Slugify string for URLs
+ */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// ========== File Utilities ==========
+
+/**
+ * Format file size to human readable string
+ */
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const size = bytes / Math.pow(1024, i);
+  
+  return `${size.toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`;
+}
+
+/**
+ * Get file extension from filename
+ */
+export function getFileExtension(filename: string): string {
+  return filename.split('.').pop()?.toLowerCase() || '';
+}
+
+/**
+ * Get file type from extension
+ */
+export function getFileType(filename: string): 'image' | 'video' | 'audio' | 'document' | 'other' {
+  const ext = getFileExtension(filename);
+  
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
+  const videoExts = ['mp4', 'webm', 'ogg', 'avi', 'mov', 'mkv'];
+  const audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'];
+  const documentExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'];
+  
+  if (imageExts.includes(ext)) return 'image';
+  if (videoExts.includes(ext)) return 'video';
+  if (audioExts.includes(ext)) return 'audio';
+  if (documentExts.includes(ext)) return 'document';
+  return 'other';
 }
 
 /**
@@ -323,87 +320,15 @@ export function isValidPhoneNumber(phone: string): boolean {
 }
 
 /**
- * Check if string contains only alphanumeric characters
+ * Validate URL format
  */
-export function isAlphanumeric(str: string): boolean {
-  return /^[a-zA-Z0-9]+$/.test(str);
-}
-
-/**
- * Check if string is a valid URL
- */
-export function isValidUrl(str: string): boolean {
+export function isValidUrl(url: string): boolean {
   try {
-    new URL(str);
+    new URL(url);
     return true;
   } catch {
     return false;
   }
-}
-
-// ========== Array Utilities ==========
-
-/**
- * Remove duplicates from array
- */
-export function removeDuplicates<T>(array: T[]): T[] {
-  return [...new Set(array)];
-}
-
-/**
- * Chunk array into smaller arrays
- */
-export function chunkArray<T>(array: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
-/**
- * Shuffle array randomly
- */
-export function shuffleArray<T>(array: T[]): T[] {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
-
-/**
- * Group array by key
- */
-export function groupBy<T, K extends string | number | symbol>(
-  array: T[],
-  keyFn: (item: T) => K
-): Record<K, T[]> {
-  return array.reduce((groups, item) => {
-    const key = keyFn(item);
-    if (!groups[key]) {
-      groups[key] = [];
-    }
-    groups[key].push(item);
-    return groups;
-  }, {} as Record<K, T[]>);
-}
-
-/**
- * Sort array by multiple keys
- */
-export function sortBy<T>(array: T[], ...sortKeys: ((item: T) => any)[]): T[] {
-  return [...array].sort((a, b) => {
-    for (const sortKey of sortKeys) {
-      const aVal = sortKey(a);
-      const bVal = sortKey(b);
-      
-      if (aVal < bVal) return -1;
-      if (aVal > bVal) return 1;
-    }
-    return 0;
-  });
 }
 
 // ========== Object Utilities ==========
@@ -490,6 +415,13 @@ export function formatNumber(num: number): string {
   return num.toLocaleString();
 }
 
+/**
+ * Convert number to percentage
+ */
+export function toPercentage(value: number, total: number): number {
+  return total === 0 ? 0 : Math.round((value / total) * 100);
+}
+
 // ========== Color Utilities ==========
 
 /**
@@ -515,6 +447,18 @@ export function isDarkColor(color: string): boolean {
   const b = parseInt(hex.substr(4, 2), 16);
   const brightness = (r * 299 + g * 587 + b * 114) / 1000;
   return brightness < 128;
+}
+
+/**
+ * Convert hex to RGB
+ */
+export function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : null;
 }
 
 // ========== Browser Utilities ==========
@@ -562,13 +506,10 @@ export function downloadFile(url: string, filename: string): void {
 }
 
 /**
- * Get device type
+ * Check if device is mobile
  */
-export function getDeviceType(): 'mobile' | 'tablet' | 'desktop' {
-  const width = window.innerWidth;
-  if (width < 768) return 'mobile';
-  if (width < 1024) return 'tablet';
-  return 'desktop';
+export function isMobileDevice(): boolean {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
 /**
@@ -579,6 +520,103 @@ export function isTouchDevice(): boolean {
 }
 
 /**
+ * Get device type
+ */
+export function getDeviceType(): 'mobile' | 'tablet' | 'desktop' {
+  const userAgent = navigator.userAgent;
+  
+  if (/tablet|ipad/i.test(userAgent)) return 'tablet';
+  if (/mobile|android|iphone/i.test(userAgent)) return 'mobile';
+  return 'desktop';
+}
+
+// ========== Array Utilities ==========
+
+/**
+ * Remove duplicates from array
+ */
+export function unique<T>(array: T[]): T[] {
+  return [...new Set(array)];
+}
+
+/**
+ * Group array by key
+ */
+export function groupBy<T, K extends keyof T>(array: T[], key: K): Record<string, T[]> {
+  return array.reduce((groups, item) => {
+    const group = String(item[key]);
+    if (!groups[group]) {
+      groups[group] = [];
+    }
+    groups[group].push(item);
+    return groups;
+  }, {} as Record<string, T[]>);
+}
+
+/**
+ * Shuffle array
+ */
+export function shuffle<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+/**
+ * Chunk array into smaller arrays
+ */
+export function chunk<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+// ========== Local Storage Utilities ==========
+
+/**
+ * Safe localStorage setItem
+ */
+export function setLocalStorage(key: string, value: any): boolean {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Safe localStorage getItem
+ */
+export function getLocalStorage<T>(key: string, defaultValue?: T): T | null {
+  try {
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : defaultValue || null;
+  } catch {
+    return defaultValue || null;
+  }
+}
+
+/**
+ * Safe localStorage removeItem
+ */
+export function removeLocalStorage(key: string): boolean {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ========== Debounce and Throttle ==========
+
+/**
  * Debounce function
  */
 export function debounce<T extends (...args: any[]) => any>(
@@ -586,9 +624,13 @@ export function debounce<T extends (...args: any[]) => any>(
   wait: number
 ): (...args: Parameters<T>) => void {
   let timeout: NodeJS.Timeout;
-  return (...args: Parameters<T>) => {
+  return function executedFunction(...args: Parameters<T>) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
     clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
+    timeout = setTimeout(later, wait);
   };
 }
 
@@ -597,49 +639,137 @@ export function debounce<T extends (...args: any[]) => any>(
  */
 export function throttle<T extends (...args: any[]) => any>(
   func: T,
-  wait: number
+  limit: number
 ): (...args: Parameters<T>) => void {
-  let inThrottle = false;
-  return (...args: Parameters<T>) => {
+  let inThrottle: boolean;
+  return function (this: any, ...args: Parameters<T>) {
     if (!inThrottle) {
-      func(...args);
+      func.apply(this, args);
       inThrottle = true;
-      setTimeout(() => {
-        inThrottle = false;
-      }, wait);
+      setTimeout(() => inThrottle = false, limit);
     }
   };
 }
 
-/**
- * Sleep/delay function
- */
-export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// ========== Error Utilities ==========
+// ========== Error Handling ==========
 
 /**
- * Get error message from various error types
+ * Safe async function wrapper
  */
-export function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  if (error && typeof error === 'object' && 'message' in error) {
-    return String(error.message);
+export async function safeAsync<T>(
+  asyncFn: () => Promise<T>,
+  errorHandler?: (error: Error) => void
+): Promise<T | null> {
+  try {
+    return await asyncFn();
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    errorHandler?.(err);
+    return null;
   }
-  return 'An unknown error occurred';
 }
 
 /**
- * Handle async errors gracefully
+ * Retry async function
  */
-export function handleAsyncError<T>(
-  promise: Promise<T>,
-  defaultValue?: T
-): Promise<[T | typeof defaultValue, Error | null]> {
-  return promise
-    .then<[T, null]>((value: T) => [value, null])
-    .catch<[typeof defaultValue, Error]>((error: Error) => [defaultValue as typeof defaultValue, error]);
+export async function retryAsync<T>(
+  asyncFn: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> {
+  let lastError: Error;
+  
+  for (let i = 0; i <= maxRetries; i++) {
+    try {
+      return await asyncFn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      if (i === maxRetries) {
+        throw lastError;
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+    }
+  }
+  
+  throw lastError!;
 }
+
+// ========== Export all utilities ==========
+export default {
+  // Date & Time
+  formatChatDate,
+  formatTime,
+  formatLastSeen,
+  formatDistanceToNow,
+  formatDuration,
+  getRelativeTime,
+  
+  // String
+  capitalize,
+  capitalizeWords,
+  getInitials,
+  truncate,
+  stripHtml,
+  escapeHtml,
+  generateRandomString,
+  generateUniqueId,
+  slugify,
+  
+  // File
+  formatFileSize,
+  getFileExtension,
+  getFileType,
+  formatPhoneNumber,
+  
+  // Validation
+  isValidEmail,
+  isValidUsername,
+  isValidPhoneNumber,
+  isValidUrl,
+  
+  // Object
+  deepClone,
+  isEmpty,
+  pick,
+  omit,
+  
+  // Number
+  clamp,
+  randomBetween,
+  roundTo,
+  formatNumber,
+  toPercentage,
+  
+  // Color
+  generateColorFromString,
+  isDarkColor,
+  hexToRgb,
+  
+  // Browser
+  copyToClipboard,
+  downloadFile,
+  isMobileDevice,
+  isTouchDevice,
+  getDeviceType,
+  
+  // Array
+  unique,
+  groupBy,
+  shuffle,
+  chunk,
+  
+  // Storage
+  setLocalStorage,
+  getLocalStorage,
+  removeLocalStorage,
+  
+  // Function
+  debounce,
+  throttle,
+  
+  // Error
+  safeAsync,
+  retryAsync,
+};

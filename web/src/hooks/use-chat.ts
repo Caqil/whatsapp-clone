@@ -48,8 +48,8 @@ interface UseChatState {
 interface UseChatActions {
   // Chat Management
   loadChats: () => Promise<void>;
-  createChat: (request: CreateChatRequest) => Promise<Chat>;
-  updateChat: (chatId: string, request: UpdateChatRequest) => Promise<Chat>;
+  createChat: (request: CreateChatRequest) => Promise<ChatWithUsers>;
+  updateChat: (chatId: string, request: UpdateChatRequest) => Promise<ChatWithUsers>;
   deleteChat: (chatId: string) => Promise<void>;
   
   // Current Chat
@@ -142,7 +142,7 @@ export function useChat(): UseChatReturn {
     });
 
     toast.error(message);
-  }, [updateState, toast]);
+  }, [updateState]);
 
   // Load user data for participants
   const loadUsers = useCallback(async (userIds: string[]) => {
@@ -179,62 +179,82 @@ export function useChat(): UseChatReturn {
     }
   }, []);
 
-  // Transform chat data and load missing users
-  const transformChatData = useCallback(async (chats: Chat[]): Promise<ChatWithUsers[]> => {
-    // Collect all participant IDs
-    const allParticipantIds = new Set<string>();
-    chats.forEach(chat => {
-      chat.participants.forEach(id => allParticipantIds.add(id));
-      allParticipantIds.add(chat.createdBy);
-    });
+  // Convert Chat (backend format) to ChatWithUsers (frontend format)
+  const convertChatToClientFormat = useCallback(async (chat: Chat): Promise<ChatWithUsers> => {
+    // Load participant users
+    await loadUsers([...chat.participants, chat.createdBy]);
 
-    // Load missing users
-    await loadUsers(Array.from(allParticipantIds));
+    // Convert participant IDs to User objects
+    const participants = chat.participants
+      .map(id => state.allUsers.get(id))
+      .filter((user): user is User => user !== null);
 
-    // Transform chats with user data
-    return chats.map(chat => {
-      const participants = chat.participants
-        .map(id => state.allUsers.get(id))
-        .filter((user): user is User => user !== null);
+    const createdByUser = state.allUsers.get(chat.createdBy) || {
+      id: chat.createdBy,
+      username: 'Unknown',
+      email: '',
+      firstName: 'Unknown',
+      lastName: 'User',
+      avatar: '',
+      phone: '',
+      bio: '',
+      isOnline: false,
+      lastSeen: new Date().toISOString(),
+      isVerified: false,
+      loginMethod: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
 
-      const createdByUser = state.allUsers.get(chat.createdBy);
-
-      return {
-        ...chat,
-        participants,
-        createdByUser: createdByUser || {
-          id: chat.createdBy,
-          username: 'Unknown',
-          email: '',
-          firstName: 'Unknown',
-          lastName: 'User',
-          avatar: '',
-          phone: '',
-          bio: '',
-          isOnline: false,
-          lastSeen: new Date().toISOString(),
-          isVerified: false,
-          loginMethod: '',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        unreadCount: 0, // This would come from the API
-        isTyping: false,
-        typingUsers: [],
-        isPinned: getPinnedChats()?.includes(chat.id) || false,
-        isMuted: isChatMuted(chat.id),
-        isArchived: false, // This would come from the API
-      } as ChatWithUsers;
-    });
+    return {
+      ...chat,
+      participants,
+      createdByUser,
+      unreadCount: 0, // This would come from the API
+      isTyping: false,
+      typingUsers: [],
+      isPinned: getPinnedChats()?.includes(chat.id) || false,
+      isMuted: isChatMuted(chat.id),
+      isArchived: false, // This would come from the API
+    };
   }, [state.allUsers, loadUsers]);
+
+  // Handle the API response type mismatch
+  // Your API is typed as returning ChatWithUsers[] but your Go backend returns Chat[]
+  const handleApiResponse = useCallback(async (apiResponse: any): Promise<ChatWithUsers[]> => {
+    // Check if the response is already in ChatWithUsers format
+    if (Array.isArray(apiResponse) && apiResponse.length > 0) {
+      const firstItem = apiResponse[0];
+      
+      // If participants is User[], it's already ChatWithUsers format
+      if (firstItem.participants && Array.isArray(firstItem.participants) && 
+          firstItem.participants.length > 0 && typeof firstItem.participants[0] === 'object') {
+        return apiResponse as ChatWithUsers[];
+      }
+      
+      // If participants is string[], it's Chat format that needs conversion
+      if (firstItem.participants && Array.isArray(firstItem.participants) && 
+          firstItem.participants.length > 0 && typeof firstItem.participants[0] === 'string') {
+        const chats = apiResponse as Chat[];
+        const convertedChats = await Promise.all(
+          chats.map(chat => convertChatToClientFormat(chat))
+        );
+        return convertedChats;
+      }
+    }
+    
+    return apiResponse as ChatWithUsers[];
+  }, [convertChatToClientFormat]);
 
   // ========== Chat Management ==========
 
   const loadChats = useCallback(async () => {
     try {
       updateState({ isLoading: true, error: null });
-      const chatsData = await chatApi.getUserChats();
-      const transformedChats = await transformChatData(chatsData);
+      
+      // The API claims to return ChatWithUsers[] but might actually return Chat[]
+      const apiResponse = await chatApi.getUserChats();
+      const transformedChats = await handleApiResponse(apiResponse);
 
       const chatsMap = new Map<string, ChatWithUsers>();
       transformedChats.forEach(chat => {
@@ -253,16 +273,17 @@ export function useChat(): UseChatReturn {
     } catch (error) {
       handleError(error, 'loadChats');
     }
-  }, [updateState, handleError, transformChatData, joinChat]);
+  }, [updateState, handleError, handleApiResponse, joinChat]);
 
-  const createChat = useCallback(async (request: CreateChatRequest): Promise<Chat> => {
+  const createChat = useCallback(async (request: CreateChatRequest): Promise<ChatWithUsers> => {
     try {
       updateState({ isCreating: true, error: null });
-      const chat = await chatApi.create(request);
       
-      // Transform and add to state
-      const transformedChats = await transformChatData([chat]);
-      const transformedChat = transformedChats[0];
+      // chatApi.create returns Chat (with string[] participants)
+      const chat: Chat = await chatApi.create(request);
+      
+      // Convert to ChatWithUsers format
+      const transformedChat = await convertChatToClientFormat(chat);
       
       setState(prev => {
         const newChats = new Map(prev.chats);
@@ -279,27 +300,28 @@ export function useChat(): UseChatReturn {
       joinChat(chat.id);
       router.push(`/chat/${chat.id}`);
 
-      toast({
-        title: 'Chat created',
-        description: `${chat.type === 'group' ? 'Group' : 'Chat'} created successfully.`,
-        variant: 'default',
-      });
+      toast.success(`${chat.type === 'group' ? 'Group' : 'Chat'} created successfully.`);
 
-      return chat;
+      return transformedChat;
     } catch (error) {
       handleError(error, 'createChat');
       throw error;
     }
-  }, [updateState, handleError, transformChatData, joinChat, router, toast]);
+  }, [updateState, handleError, convertChatToClientFormat, joinChat, router]);
 
-  const updateChat = useCallback(async (chatId: string, request: UpdateChatRequest): Promise<Chat> => {
+  const updateChat = useCallback(async (chatId: string, request: UpdateChatRequest): Promise<ChatWithUsers> => {
     try {
       updateState({ isUpdating: true, error: null });
       // Note: This endpoint might not exist in your backend yet
       // const updatedChat = await chatApi.updateChat(chatId, request);
       
       // For now, simulate the update
-      const updatedChat = { ...state.chats.get(chatId)!, ...request };
+      const currentChat = state.chats.get(chatId);
+      if (!currentChat) {
+        throw new Error('Chat not found');
+      }
+      
+      const updatedChat = { ...currentChat, ...request };
       
       setState(prev => {
         const newChats = new Map(prev.chats);
@@ -312,18 +334,14 @@ export function useChat(): UseChatReturn {
         };
       });
 
-      toast({
-        title: 'Chat updated',
-        description: 'Chat information updated successfully.',
-        variant: 'default',
-      });
+      toast.success('Chat information updated successfully.');
 
-      return updatedChat as Chat;
+      return updatedChat;
     } catch (error) {
       handleError(error, 'updateChat');
       throw error;
     }
-  }, [state.chats, updateState, handleError, toast]);
+  }, [state.chats, updateState, handleError]);
 
   const deleteChat = useCallback(async (chatId: string): Promise<void> => {
     try {
@@ -348,15 +366,11 @@ export function useChat(): UseChatReturn {
         router.push('/chat');
       }
 
-      toast({
-        title: 'Chat deleted',
-        description: 'Chat deleted successfully.',
-        variant: 'default',
-      });
+      toast.success('Chat deleted successfully.');
     } catch (error) {
       handleError(error, 'deleteChat');
     }
-  }, [state.currentChat, updateState, handleError, socketLeaveChat, router, toast]);
+  }, [state.currentChat, updateState, handleError, socketLeaveChat, router]);
 
   // ========== Current Chat Management ==========
 
@@ -383,9 +397,17 @@ export function useChat(): UseChatReturn {
       
       if (!chat) {
         // Chat not in local state, fetch it
-        const chatData = await chatApi.getChat(chatId);
-        const transformedChats = await transformChatData([chatData]);
-        chat = transformedChats[0];
+        const apiResponse = await chatApi.getChat(chatId);
+        
+        // Handle the response format mismatch
+        if (apiResponse.participants && Array.isArray(apiResponse.participants) && 
+            apiResponse.participants.length > 0 && typeof apiResponse.participants[0] === 'string') {
+          // It's actually a Chat, convert it
+          chat = await convertChatToClientFormat(apiResponse as any as Chat);
+        } else {
+          // It's already a ChatWithUsers
+          chat = apiResponse as ChatWithUsers;
+        }
         
         setState(prev => {
           const newChats = new Map(prev.chats);
@@ -398,9 +420,9 @@ export function useChat(): UseChatReturn {
     } catch (error) {
       handleError(error, 'selectChatById');
     }
-  }, [state.chats, setCurrentChat, handleError, transformChatData]);
+  }, [state.chats, setCurrentChat, handleError, convertChatToClientFormat]);
 
-  const getCurrentChatId = useCallback((): string | null => {
+  const getCurrentChatIdValue = useCallback((): string | null => {
     return state.currentChat?.id || null;
   }, [state.currentChat]);
 
@@ -461,15 +483,11 @@ export function useChat(): UseChatReturn {
         return prev;
       });
 
-      toast({
-        title: 'Chat pinned',
-        description: 'Chat has been pinned to the top.',
-        variant: 'default',
-      });
+      toast.success('Chat has been pinned to the top.');
     } catch (error) {
       handleError(error, 'pinChat');
     }
-  }, [handleError, toast]);
+  }, [handleError]);
 
   const unpinChat = useCallback(async (chatId: string): Promise<void> => {
     try {
@@ -490,15 +508,11 @@ export function useChat(): UseChatReturn {
         return prev;
       });
 
-      toast({
-        title: 'Chat unpinned',
-        description: 'Chat has been unpinned.',
-        variant: 'default',
-      });
+      toast.success('Chat has been unpinned.');
     } catch (error) {
       handleError(error, 'unpinChat');
     }
-  }, [handleError, toast]);
+  }, [handleError]);
 
   const togglePin = useCallback(async (chatId: string): Promise<void> => {
     const chat = state.chats.get(chatId);
@@ -528,15 +542,11 @@ export function useChat(): UseChatReturn {
         return prev;
       });
 
-      toast({
-        title: 'Chat muted',
-        description: duration === -1 ? 'Chat muted forever.' : 'Chat muted.',
-        variant: 'default',
-      });
+      toast.success(duration === -1 ? 'Chat muted forever.' : 'Chat muted.');
     } catch (error) {
       handleError(error, 'muteChat');
     }
-  }, [handleError, toast]);
+  }, [handleError]);
 
   const unmuteChatAction = useCallback(async (chatId: string): Promise<void> => {
     try {
@@ -557,15 +567,11 @@ export function useChat(): UseChatReturn {
         return prev;
       });
 
-      toast({
-        title: 'Chat unmuted',
-        description: 'Chat has been unmuted.',
-        variant: 'default',
-      });
+      toast.success('Chat has been unmuted.');
     } catch (error) {
       handleError(error, 'unmuteChat');
     }
-  }, [handleError, toast]);
+  }, [handleError]);
 
   const toggleMute = useCallback(async (chatId: string): Promise<void> => {
     const chat = state.chats.get(chatId);
@@ -578,21 +584,13 @@ export function useChat(): UseChatReturn {
 
   const archiveChat = useCallback(async (chatId: string): Promise<void> => {
     // Implementation would depend on your backend
-    toast({
-      title: 'Feature coming soon',
-      description: 'Chat archiving will be available soon.',
-      variant: 'default',
-    });
-  }, [toast]);
+    toast.info('Chat archiving will be available soon.');
+  }, []);
 
   const unarchiveChat = useCallback(async (chatId: string): Promise<void> => {
     // Implementation would depend on your backend
-    toast({
-      title: 'Feature coming soon',
-      description: 'Chat unarchiving will be available soon.',
-      variant: 'default',
-    });
-  }, [toast]);
+    toast.info('Chat unarchiving will be available soon.');
+  }, []);
 
   // ========== Utility Functions ==========
 
@@ -615,13 +613,14 @@ export function useChat(): UseChatReturn {
     }
 
     // For direct chats, find the other participant
-    const otherParticipant = chat.participants.find(p => p.id !== getCurrentChatId());
+    // Note: We need to compare with current user ID, not chat ID
+    const otherParticipant = chat.participants.find(p => p.id !== getCurrentChatIdValue());
     if (otherParticipant) {
       return `${otherParticipant.firstName} ${otherParticipant.lastName}`;
     }
 
     return 'Direct Chat';
-  }, []);
+  }, [getCurrentChatIdValue]);
 
   const getChatAvatar = useCallback((chat: ChatWithUsers): string => {
     if (chat.avatar) return chat.avatar;
@@ -631,9 +630,9 @@ export function useChat(): UseChatReturn {
     }
 
     // For direct chats, use other participant's avatar
-    const otherParticipant = chat.participants.find(p => p.id !== getCurrentChatId());
+    const otherParticipant = chat.participants.find(p => p.id !== getCurrentChatIdValue());
     return otherParticipant?.avatar || '/images/default-avatar.png';
-  }, []);
+  }, [getCurrentChatIdValue]);
 
   const getPinnedChatsData = useCallback((): ChatWithUsers[] => {
     return Array.from(state.chats.values()).filter(chat => chat.isPinned);
@@ -721,44 +720,24 @@ export function useChat(): UseChatReturn {
 
   // Participant management stubs (to be implemented based on your backend)
   const addParticipants = useCallback(async (chatId: string, userIds: string[]): Promise<void> => {
-    toast({
-      title: 'Feature coming soon',
-      description: 'Adding participants will be available soon.',
-      variant: 'default',
-    });
-  }, [toast]);
+    toast.info('Adding participants will be available soon.');
+  }, []);
 
   const removeParticipant = useCallback(async (chatId: string, userId: string): Promise<void> => {
-    toast({
-      title: 'Feature coming soon',
-      description: 'Removing participants will be available soon.',
-      variant: 'default',
-    });
-  }, [toast]);
+    toast.info('Removing participants will be available soon.');
+  }, []);
 
   const makeAdmin = useCallback(async (chatId: string, userId: string): Promise<void> => {
-    toast({
-      title: 'Feature coming soon',
-      description: 'Admin management will be available soon.',
-      variant: 'default',
-    });
-  }, [toast]);
+    toast.info('Admin management will be available soon.');
+  }, []);
 
   const removeAdmin = useCallback(async (chatId: string, userId: string): Promise<void> => {
-    toast({
-      title: 'Feature coming soon',
-      description: 'Admin management will be available soon.',
-      variant: 'default',
-    });
-  }, [toast]);
+    toast.info('Admin management will be available soon.');
+  }, []);
 
   const leaveChat = useCallback(async (chatId: string): Promise<void> => {
-    toast({
-      title: 'Feature coming soon',
-      description: 'Leave chat will be available soon.',
-      variant: 'default',
-    });
-  }, [toast]);
+    toast.info('Leave chat will be available soon.');
+  }, []);
 
   // Initialize chats on mount
   useEffect(() => {
@@ -786,7 +765,7 @@ export function useChat(): UseChatReturn {
     // Current Chat
     setCurrentChat,
     selectChatById,
-    getCurrentChatId,
+    getCurrentChatId: getCurrentChatIdValue,
 
     // Search
     searchChats,
