@@ -56,9 +56,16 @@ func (h *AuthHandler) VerifyMagicLink(c *gin.Context) {
 
 	response, err := h.authUsecase.VerifyMagicLink(c.Request.Context(), &req, ipAddress, userAgent)
 	if err != nil {
-		// If user registration required, return specific error
+		// If user registration required, return specific error with token
 		if err.Error() == "user registration required" {
-			utils.ErrorResponse(c, http.StatusPreconditionRequired, "User registration required", err)
+			c.JSON(http.StatusPreconditionRequired, gin.H{
+				"success": false,
+				"message": "User registration required",
+				"data": gin.H{
+					"token":                req.Token,
+					"requiresRegistration": true,
+				},
+			})
 			return
 		}
 		utils.ErrorResponse(c, http.StatusUnauthorized, "Magic link verification failed", err)
@@ -67,7 +74,6 @@ func (h *AuthHandler) VerifyMagicLink(c *gin.Context) {
 
 	utils.SuccessResponse(c, http.StatusOK, "Login successful", response)
 }
-
 func (h *AuthHandler) RegisterWithMagicLink(c *gin.Context) {
 	token := c.Query("token")
 	if token == "" {

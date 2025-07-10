@@ -87,7 +87,7 @@ func (a *AuthUsecase) SendMagicLink(ctx context.Context, req *entities.MagicLink
 	}
 
 	// Generate magic link URL
-	magicLinkURL := fmt.Sprintf("%s/auth/verify?token=%s", a.frontendBaseURL, token)
+	magicLinkURL := fmt.Sprintf("%s/verify?token=%s", a.frontendBaseURL, token)
 
 	// Send email
 	if err := a.emailService.SendMagicLink(req.Email, firstName, magicLinkURL); err != nil {
@@ -119,30 +119,38 @@ func (a *AuthUsecase) VerifyMagicLink(ctx context.Context, req *entities.VerifyM
 		return nil, errors.New("magic link already used")
 	}
 
-	// Mark as used
-	if err := a.magicLinkRepo.MarkAsUsed(ctx, magicLink.ID); err != nil {
-		return nil, err
-	}
-
 	var user *entities.User
 
 	if magicLink.UserID != nil {
-		// Existing user
+		// Existing user - login
 		user, err = a.userRepo.GetByID(ctx, *magicLink.UserID)
 		if err != nil {
 			return nil, errors.New("user not found")
 		}
-
-		// Update login info
-		now := time.Now()
-		user.LastLoginAt = &now
-		user.LoginMethod = "magic_link"
-		user.IsVerified = true
-		user.VerifiedAt = &now
-		a.userRepo.Update(ctx, user)
 	} else {
-		return nil, errors.New("user registration required")
+		// No UserID - check if user exists by email
+		existingUser, err := a.userRepo.GetByEmail(ctx, magicLink.Email)
+		if err == nil && existingUser != nil {
+			// User exists - use existing user
+			user = existingUser
+		} else {
+			// New user - return registration required
+			return nil, errors.New("user registration required")
+		}
 	}
+
+	// Mark magic link as used ONLY after we confirm user exists or is created
+	if err := a.magicLinkRepo.MarkAsUsed(ctx, magicLink.ID); err != nil {
+		return nil, err
+	}
+
+	// Update user login info
+	now := time.Now()
+	user.LastLoginAt = &now
+	user.LoginMethod = "magic_link"
+	user.IsVerified = true
+	user.VerifiedAt = &now
+	a.userRepo.Update(ctx, user)
 
 	// Generate tokens
 	accessToken, err := auth.GenerateToken(user.ID, user.Email, a.jwtSecret)
@@ -159,7 +167,7 @@ func (a *AuthUsecase) VerifyMagicLink(ctx context.Context, req *entities.VerifyM
 	session := &entities.UserSession{
 		UserID:       user.ID,
 		RefreshToken: refreshToken,
-		DeviceType:   entities.DeviceWeb, // Default for magic link
+		DeviceType:   entities.DeviceWeb,
 		DeviceName:   "Web Browser",
 		IPAddress:    ipAddress,
 		UserAgent:    userAgent,

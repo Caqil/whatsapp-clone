@@ -116,3 +116,13 @@ type QRStatusResponse struct {
 	User      *User           `json:"user,omitempty"`
 	ScannedAt *time.Time      `json:"scannedAt,omitempty"`
 }
+type AuthError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Token   string `json:"token,omitempty"`
+	Email   string `json:"email,omitempty"`
+}
+
+func (e *AuthError) Error() string {
+	return e.Message
+}
