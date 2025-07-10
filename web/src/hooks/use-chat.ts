@@ -81,7 +81,7 @@ interface UseChatActions {
   // Utilities
   getChatById: (chatId: string) => ChatWithUsers | null;
   getDirectChatWithUser: (userId: string) => ChatWithUsers | null;
-  getChatDisplayName: (chat: ChatWithUsers) => string;
+ getChatDisplayName: (chat: ChatWithUsers, currentUser?: User | null) => string; 
   getChatAvatar: (chat: ChatWithUsers) => string;
   getPinnedChats: () => ChatWithUsers[];
   getMutedChats: () => ChatWithUsers[];
@@ -122,7 +122,29 @@ export function useChat(): UseChatReturn {
 
   // Cache for loaded users
   const loadedUsers = useRef<Set<string>>(new Set());
+const getChatDisplayName = useCallback((chat: ChatWithUsers, currentUser?: User | null): string => {
+  if (chat.type === 'group') {
+    return chat.name || 'Group Chat';
+  }
 
+  if (!currentUser?.id) {
+    return 'Loading...';
+  }
+
+  const otherParticipant = chat.participants?.find(p => 
+    p && typeof p === 'object' && p.id && p.id !== currentUser.id
+  );
+  
+  if (!otherParticipant) {
+    return 'Direct Chat';
+  }
+
+  const firstName = otherParticipant.firstName || '';
+  const lastName = otherParticipant.lastName || '';
+  const fullName = `${firstName} ${lastName}`.trim();
+  
+  return fullName || otherParticipant.username || 'Unknown User';
+}, []);
   // Update state helper
   const updateState = useCallback((updates: Partial<UseChatState>) => {
     setState(prev => ({ ...prev, ...updates }));
@@ -144,40 +166,6 @@ export function useChat(): UseChatReturn {
     toast.error(message);
   }, [updateState]);
 
-  // Load user data for participants
-  const loadUsers = useCallback(async (userIds: string[]) => {
-    const newUserIds = userIds.filter(id => !loadedUsers.current.has(id));
-    if (newUserIds.length === 0) return;
-
-    try {
-      // In a real implementation, you'd have a bulk user fetch API
-      // For now, we'll simulate with individual calls
-      const userPromises = newUserIds.map(async (userId) => {
-        try {
-          // This would be a getUserById API call
-          // For now, we'll use search as a fallback
-          const users = await userApi.search(userId);
-          return users.find(u => u.id === userId);
-        } catch {
-          return null;
-        }
-      });
-
-      const users = await Promise.all(userPromises);
-      const validUsers = users.filter((user): user is User => user !== null);
-
-      setState(prev => {
-        const newAllUsers = new Map(prev.allUsers);
-        validUsers.forEach(user => {
-          newAllUsers.set(user.id, user);
-          loadedUsers.current.add(user.id);
-        });
-        return { ...prev, allUsers: newAllUsers };
-      });
-    } catch (error) {
-      console.error('Failed to load users:', error);
-    }
-  }, []);
 
   // Convert Chat (backend format) to ChatWithUsers (frontend format)
 const convertChatToClientFormat = useCallback((chat: Chat): ChatWithUsers => {
@@ -612,33 +600,6 @@ const loadChats = useCallback(async () => {
     return null;
   }, [state.chats]);
 
-const getChatDisplayName = useCallback((chat: ChatWithUsers, currentUser?: User | null): string => {
-  if (chat.type === 'group') {
-    return chat.name || 'Group Chat';
-  }
-
-  // Get current user ID properly
-  const currentUserId = currentUser?.id;
-  if (!currentUserId) {
-    return 'Loading...';
-  }
-
-  // For direct chats, find the other participant
-  const otherParticipant = chat.participants?.find(p => 
-    p && p.id && p.id !== currentUserId
-  );
-  
-  if (!otherParticipant) {
-    return 'Direct Chat';
-  }
-
-  // Build display name properly
-  const firstName = otherParticipant.firstName || '';
-  const lastName = otherParticipant.lastName || '';
-  const fullName = `${firstName} ${lastName}`.trim();
-  
-  return fullName || otherParticipant.username || 'Unknown User';
-}, []);
 
   const getChatAvatar = useCallback((chat: ChatWithUsers): string => {
     if (chat.avatar) return chat.avatar;

@@ -37,11 +37,10 @@ import { APP_CONFIG } from "@/lib/constants";
 
 export default function ChatPage() {
   const { user } = useAuth();
-  const { chats, isLoading, error, loadChats } = useChat();
   const router = useRouter();
   const isMobile = useIsMobile();
   const [searchQuery, setSearchQuery] = useState("");
-
+  const { chats, isLoading, error,loadChats, getChatDisplayName } = useChat();
   // Load chats when component mounts
   useEffect(() => {
     loadChats();
@@ -52,18 +51,6 @@ export default function ChatPage() {
     const chatName = getChatDisplayName(chat);
     return chatName.toLowerCase().includes(searchQuery.toLowerCase());
   });
-
-  const getChatDisplayName = (chat: any) => {
-    if (chat.type === "group" || chat.isGroup) {
-      return chat.name || "Group Chat";
-    }
-    // For direct chats, find the other participant
-    const otherUser = chat.participants?.find((p: any) => p.id !== user?.id);
-    return otherUser
-      ? `${otherUser.firstName || ""} ${otherUser.lastName || ""}`.trim() ||
-          "Unknown User"
-      : "Unknown User";
-  };
 
   const getChatLastMessage = (chat: any) => {
     if (!chat.lastMessage) return "No messages yet";
