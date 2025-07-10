@@ -359,25 +359,25 @@ export const KEYBOARD_SHORTCUTS = {
 
 export const STORAGE_KEYS = {
   // Authentication
-  ACCESS_TOKEN: 'whatsapp_access_token',
-  REFRESH_TOKEN: 'whatsapp_refresh_token',
-  USER_DATA: 'whatsapp_user_data',
-  
+  ACCESS_TOKEN: 'bro_access_token',
+  REFRESH_TOKEN: 'bro_refresh_token',
+  USER_DATA: 'bro_user_data',
+  AUTH_STATE: 'bro_auth_state',
   // Preferences
-  THEME: 'whatsapp_theme',
-  LANGUAGE: 'whatsapp_language',
-  NOTIFICATIONS: 'whatsapp_notifications',
-  
+  THEME: 'bro_theme',
+  LANGUAGE: 'bro_language',
+  NOTIFICATIONS: 'bro_notifications',
+
   // Chat state
-  CURRENT_CHAT: 'whatsapp_current_chat',
-  CHAT_DRAFTS: 'whatsapp_chat_drafts',
-  PINNED_CHATS: 'whatsapp_pinned_chats',
-  MUTED_CHATS: 'whatsapp_muted_chats',
-  
+  CURRENT_CHAT: 'bro_current_chat',
+  CHAT_DRAFTS: 'bro_chat_drafts',
+  PINNED_CHATS: 'bro_pinned_chats',
+  MUTED_CHATS: 'bro_muted_chats',
+
   // UI state
-  SIDEBAR_COLLAPSED: 'whatsapp_sidebar_collapsed',
-  EMOJI_RECENT: 'whatsapp_emoji_recent',
-  SEARCH_HISTORY: 'whatsapp_search_history',
+  SIDEBAR_COLLAPSED: 'bro_sidebar_collapsed',
+  EMOJI_RECENT: 'bro_emoji_recent',
+  SEARCH_HISTORY: 'bro_search_history',
 } as const;
 
 // ========== Error Messages ==========
