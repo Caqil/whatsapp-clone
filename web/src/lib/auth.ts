@@ -273,7 +273,7 @@ export class MagicLinkManager {
    */
   static generateMagicLinkUrl(token: string, baseUrl?: string): string {
     const base = baseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
-    return `${base}/auth/verify?token=${encodeURIComponent(token)}`;
+    return `${base}/verify?token=${encodeURIComponent(token)}`;
   }
 
   /**

@@ -4,7 +4,7 @@ export const API_ENDPOINTS = {
   AUTH: {
     // Magic Link Authentication
     MAGIC_LINK: '/auth/magic-link',
-    VERIFY: '/auth/verify',
+    VERIFY: '/verify',
     REGISTER_MAGIC: '/auth/register-magic',
     
     // QR Code Authentication
