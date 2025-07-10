@@ -1,3 +1,4 @@
+// cmd/server/main.go - UPDATED
 package main
 
 import (
@@ -30,19 +31,37 @@ func main() {
 	chatRepo := mongoRepo.NewChatRepository(db)
 	messageRepo := mongoRepo.NewMessageRepository(db)
 
+	// Initialize new auth repositories
+	magicLinkRepo := mongoRepo.NewMagicLinkRepository(db)
+	qrCodeRepo := mongoRepo.NewQRCodeRepository(db)
+	sessionRepo := mongoRepo.NewUserSessionRepository(db)
+
 	// Initialize WebSocket hub
 	hub := websocket.NewHub()
 	go hub.Run()
 
 	// Initialize services
 	fileUploadService := services.NewFileUploadService()
+	emailService := services.NewEmailService()
 
-	// Initialize use cases (with updated dependencies)
+	// Initialize use cases
 	userUsecase := usecases.NewUserUsecase(userRepo)
 	chatUsecase := usecases.NewChatUsecase(chatRepo, userRepo)
 	messageUsecase := usecases.NewMessageUsecase(messageRepo, chatRepo, userRepo, hub)
 
+	// Initialize new auth usecase
+	authUsecase := usecases.NewAuthUsecase(
+		userRepo,
+		magicLinkRepo,
+		qrCodeRepo,
+		sessionRepo,
+		emailService,
+		cfg.JWTSecret,
+		cfg.FrontendURL, // Add this to config
+	)
+
 	// Initialize handlers
+	authHandler := handlers.NewAuthHandler(authUsecase, userUsecase)
 	userHandler := handlers.NewUserHandler(userUsecase)
 	chatHandler := handlers.NewChatHandler(chatUsecase)
 	messageHandler := handlers.NewMessageHandler(messageUsecase, fileUploadService)
@@ -55,11 +74,38 @@ func main() {
 	// Serve static files (for uploaded media)
 	r.Static("/uploads", "./uploads")
 
-	// Public routes
+	// ========== NEW MAGIC LINK AUTH ROUTES ==========
 	auth := r.Group("/api/auth")
 	{
-		auth.POST("/register", userHandler.Register)
-		auth.POST("/login", userHandler.Login)
+		// Magic Link Authentication
+		auth.POST("/magic-link", authHandler.SendMagicLink)
+		auth.POST("/verify", authHandler.VerifyMagicLink)
+		auth.POST("/register-magic", authHandler.RegisterWithMagicLink)
+
+		// QR Code Authentication
+		auth.POST("/qr/generate", authHandler.GenerateQRCode)
+		auth.GET("/qr/status", authHandler.CheckQRStatus)
+		auth.POST("/qr/login", authHandler.LoginWithQRCode)
+
+		// Session Management
+		auth.POST("/refresh", authHandler.RefreshToken)
+		auth.POST("/logout", authHandler.Logout)
+
+		// Utilities
+		auth.GET("/validate", authHandler.ValidateToken)
+		auth.POST("/cleanup", authHandler.CleanupExpired)
+
+		// Legacy password auth (backward compatibility)
+		auth.POST("/register", authHandler.Register)
+		auth.POST("/login", authHandler.Login)
+	}
+
+	// Protected routes that require QR scanning (mobile app simulation)
+	qr := r.Group("/api/qr")
+	qr.Use(middleware.AuthMiddleware())
+	{
+		qr.POST("/scan", authHandler.ScanQRCode)
+		qr.POST("/logout-all", authHandler.LogoutAllDevices)
 	}
 
 	// Protected routes
@@ -121,8 +167,11 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "healthy",
-			"version": "2.0.0",
+			"version": "3.0.0",
 			"features": []string{
+				"magic-link-auth",
+				"qr-code-auth",
+				"session-management",
 				"enhanced-messaging",
 				"file-upload",
 				"reactions",
@@ -136,12 +185,22 @@ func main() {
 	// API documentation endpoint
 	r.GET("/api/docs", func(c *gin.Context) {
 		docs := map[string]interface{}{
-			"version": "2.0.0",
-			"name":    "WhatsApp Clone API",
+			"version": "3.0.0",
+			"name":    "WhatsApp Clone API with Magic Link Auth",
 			"endpoints": map[string]interface{}{
 				"auth": map[string]string{
-					"POST /api/auth/register": "Register new user",
-					"POST /api/auth/login":    "Login user",
+					"POST /api/auth/magic-link":     "Send magic link to email",
+					"POST /api/auth/verify":         "Verify magic link token",
+					"POST /api/auth/register-magic": "Register new user with magic link",
+					"POST /api/auth/qr/generate":    "Generate QR code for login",
+					"GET /api/auth/qr/status":       "Check QR code scan status",
+					"POST /api/auth/qr/login":       "Login with scanned QR code",
+					"POST /api/auth/refresh":        "Refresh access token",
+					"POST /api/auth/logout":         "Logout current session",
+					"POST /api/qr/scan":             "Scan QR code (requires auth)",
+					"POST /api/qr/logout-all":       "Logout all devices (requires auth)",
+					"POST /api/auth/register":       "Legacy password registration",
+					"POST /api/auth/login":          "Legacy password login",
 				},
 				"users": map[string]string{
 					"GET /api/users/profile": "Get user profile",
@@ -174,31 +233,45 @@ func main() {
 					"GET /api/ws": "WebSocket connection for real-time features",
 				},
 			},
-			"websocket_events": map[string]string{
-				"new_message":          "New message received",
-				"message_status":       "Message status update (delivered/read)",
-				"message_reaction":     "Message reaction added/removed",
-				"message_deleted":      "Message deleted",
-				"message_edited":       "Message edited",
-				"typing_start":         "User started typing",
-				"typing_stop":          "User stopped typing",
-				"user_online":          "User came online",
-				"user_offline":         "User went offline",
-				"file_upload_progress": "File upload progress",
-				"file_upload_complete": "File upload completed",
-				"file_upload_error":    "File upload error",
+			"auth_flow": map[string]interface{}{
+				"magic_link": []string{
+					"1. POST /api/auth/magic-link with email",
+					"2. Check email for magic link",
+					"3. POST /api/auth/verify with token from email",
+					"4. If user doesn't exist, POST /api/auth/register-magic",
+					"5. Use accessToken for API calls",
+					"6. Use refreshToken to get new accessToken",
+				},
+				"qr_code": []string{
+					"1. POST /api/auth/qr/generate to get QR code",
+					"2. Display QR code to user",
+					"3. User scans with mobile app (POST /api/qr/scan)",
+					"4. Web client polls GET /api/auth/qr/status",
+					"5. When scanned, POST /api/auth/qr/login with secret",
+					"6. Use returned tokens for authentication",
+				},
 			},
 		}
 
 		c.JSON(http.StatusOK, docs)
 	})
 
-	log.Printf("🚀 Enhanced WhatsApp Clone Server starting on port %s", cfg.Port)
+	log.Printf("🚀 Enhanced WhatsApp Clone Server v3.0.0 starting on port %s", cfg.Port)
 	log.Printf("📚 API Documentation: http://localhost:%s/api/docs", cfg.Port)
 	log.Printf("🏥 Health Check: http://localhost:%s/health", cfg.Port)
 	log.Printf("📁 File Uploads: http://localhost:%s/uploads/", cfg.Port)
 
-	log.Printf("\n🎉 New Features Available:")
+	log.Printf("\n🎉 New Authentication Features:")
+	log.Printf("   • 🔗 Magic Link Authentication (passwordless)")
+	log.Printf("   • 📱 QR Code Login (like WhatsApp Web)")
+	log.Printf("   • 🔄 Session Management & Refresh Tokens")
+	log.Printf("   • 📧 Email Service Integration")
+	log.Printf("   • 🔐 Secure Token Generation")
+	log.Printf("   • 🕒 Auto-cleanup of Expired Tokens")
+	log.Printf("   • 📱 Multi-device Support")
+	log.Printf("   • 🔙 Backward Compatible with Password Auth")
+
+	log.Printf("\n🔧 Previous Features Still Available:")
 	log.Printf("   • 📎 File Upload & Media Messages")
 	log.Printf("   • 👍 Message Reactions")
 	log.Printf("   • ↩️  Reply to Messages")
