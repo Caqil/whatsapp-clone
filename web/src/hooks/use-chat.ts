@@ -219,61 +219,69 @@ export function useChat(): UseChatReturn {
     };
   }, [state.allUsers, loadUsers]);
 
-  // Handle the API response type mismatch
-  // Your API is typed as returning ChatWithUsers[] but your Go backend returns Chat[]
-  const handleApiResponse = useCallback(async (apiResponse: any): Promise<ChatWithUsers[]> => {
-    // Check if the response is already in ChatWithUsers format
-    if (Array.isArray(apiResponse) && apiResponse.length > 0) {
-      const firstItem = apiResponse[0];
-      
-      // If participants is User[], it's already ChatWithUsers format
-      if (firstItem.participants && Array.isArray(firstItem.participants) && 
-          firstItem.participants.length > 0 && typeof firstItem.participants[0] === 'object') {
-        return apiResponse as ChatWithUsers[];
-      }
-      
-      // If participants is string[], it's Chat format that needs conversion
-      if (firstItem.participants && Array.isArray(firstItem.participants) && 
-          firstItem.participants.length > 0 && typeof firstItem.participants[0] === 'string') {
-        const chats = apiResponse as Chat[];
-        const convertedChats = await Promise.all(
-          chats.map(chat => convertChatToClientFormat(chat))
-        );
-        return convertedChats;
-      }
+const handleApiResponse = useCallback(async (apiResponse: any): Promise<ChatWithUsers[]> => {
+  // FIXED: Add early return for null/undefined/empty responses
+  if (!apiResponse || !Array.isArray(apiResponse) || apiResponse.length === 0) {
+    console.log('No chats returned from API');
+    return []; // Return empty array instead of undefined
+  }
+
+  // Check if response is already in ChatWithUsers format
+  const firstItem = apiResponse[0];
+  
+  if (firstItem) {
+    // Check if already in ChatWithUsers format
+    if (firstItem.participants && Array.isArray(firstItem.participants) && 
+        firstItem.participants.length > 0 && typeof firstItem.participants[0] === 'object') {
+      return apiResponse as ChatWithUsers[];
     }
     
-    return apiResponse as ChatWithUsers[];
-  }, [convertChatToClientFormat]);
+    // If participants is string[], it's Chat format that needs conversion
+    if (firstItem.participants && Array.isArray(firstItem.participants) && 
+        firstItem.participants.length > 0 && typeof firstItem.participants[0] === 'string') {
+      const chats = apiResponse as Chat[];
+      const convertedChats = await Promise.all(
+        chats.map(chat => convertChatToClientFormat(chat))
+      );
+      return convertedChats;
+    }
+  }
+  
+  return apiResponse as ChatWithUsers[];
+}, [convertChatToClientFormat]);
 
   // ========== Chat Management ==========
 
-  const loadChats = useCallback(async () => {
-    try {
-      updateState({ isLoading: true, error: null });
-      
-      // The API claims to return ChatWithUsers[] but might actually return Chat[]
-      const apiResponse = await chatApi.getUserChats();
-      const transformedChats = await handleApiResponse(apiResponse);
 
-      const chatsMap = new Map<string, ChatWithUsers>();
-      transformedChats.forEach(chat => {
-        chatsMap.set(chat.id, chat);
-      });
+const loadChats = useCallback(async () => {
+  try {
+    updateState({ isLoading: true, error: null });
+    
+    // The API claims to return ChatWithUsers[] but might actually return Chat[]
+    const apiResponse = await chatApi.getUserChats();
+    const transformedChats = await handleApiResponse(apiResponse);
 
-      updateState({ chats: chatsMap, isLoading: false });
+    // FIXED: Add null check and default to empty array
+    const chatsArray = transformedChats || [];
+    
+    const chatsMap = new Map<string, ChatWithUsers>();
+    chatsArray.forEach(chat => {
+      chatsMap.set(chat.id, chat);
+    });
 
-      // Restore current chat if exists
-      const currentChatId = getCurrentChatId();
-      if (currentChatId && chatsMap.has(currentChatId)) {
-        const currentChat = chatsMap.get(currentChatId)!;
-        updateState({ currentChat });
-        joinChat(currentChatId);
-      }
-    } catch (error) {
-      handleError(error, 'loadChats');
+    updateState({ chats: chatsMap, isLoading: false });
+
+    // Restore current chat if exists
+    const currentChatId = getCurrentChatId();
+    if (currentChatId && chatsMap.has(currentChatId)) {
+      const currentChat = chatsMap.get(currentChatId)!;
+      updateState({ currentChat });
+      joinChat(currentChatId);
     }
-  }, [updateState, handleError, handleApiResponse, joinChat]);
+  } catch (error) {
+    handleError(error, 'loadChats');
+  }
+}, [updateState, handleError, handleApiResponse, joinChat]);
 
   const createChat = useCallback(async (request: CreateChatRequest): Promise<ChatWithUsers> => {
     try {

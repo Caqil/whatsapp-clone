@@ -1,3 +1,4 @@
+// src/app/(auth)/verify/page.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -29,7 +30,7 @@ export default function AuthVerifyRedirect() {
   }, [router, searchParams]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
       <div className="text-center space-y-4">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto">
           <Loader2 className="h-8 w-8" />

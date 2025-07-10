@@ -315,7 +315,11 @@ export function QRCodeScanner({
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{typeof error === "string" ? error : error?.message ?? String(error)}</AlertDescription>
+                <AlertDescription>
+                  {typeof error === "string"
+                    ? error
+                    : error?.message ?? String(error)}
+                </AlertDescription>
               </Alert>
             )}
           </div>

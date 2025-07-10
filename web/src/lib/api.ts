@@ -139,12 +139,60 @@ class ApiClient {
     return response.data.data!;
   }
 
-  private async post<T>(url: string, data?: any): Promise<T> {
-    const response = await this.client.post<ApiResponse<T>>(url, data);
-    if (!response.data.success) {
-      throw new Error(response.data.error || response.data.message);
+private async post<T>(url: string, data?: any): Promise<T> {
+    try {
+      const response = await this.client.post<ApiResponse<T>>(url, data);
+      
+      // Handle successful responses
+      if (response.data.success) {
+        return response.data.data!;
+      }
+      
+      // Handle unsuccessful responses that still have status 200
+      throw new Error(response.data.error || response.data.message || 'Request failed');
+      
+    } catch (error: any) {
+      // Handle axios errors
+      if (error.response) {
+        // Server responded with error status
+        const errorData = error.response.data;
+        
+        // For magic link specific errors, preserve the full error structure
+        if (error.response.status === 412 && errorData?.data?.requiresRegistration) {
+          // Preserve the full error for registration flow
+          const customError = new Error(errorData.message || 'user registration required');
+          (customError as any).response = error.response;
+          throw customError;
+        }
+        
+        // For other errors, extract the message
+        const errorMessage = errorData?.message || errorData?.error || 'Request failed';
+        throw new Error(errorMessage);
+      }
+      
+      // Network or other errors
+      throw error;
     }
-    return response.data.data!;
+  }
+
+  // FIXED: Magic Link verification with better error handling
+  async verifyMagicLink(request: VerifyMagicLinkRequest): Promise<AuthResponse> {
+    try {
+      return await this.post<AuthResponse>(API_ENDPOINTS.AUTH.VERIFY, request);
+    } catch (error: any) {
+      // Re-throw the error to preserve the response structure for registration flow
+      throw error;
+    }
+  }
+
+  // ADDED: Debug method to check magic link details
+  async getMagicLinkDetails(token: string): Promise<any> {
+    try {
+      return await this.get<any>(`${API_ENDPOINTS.AUTH.VERIFY}?token=${token}`);
+    } catch (error) {
+      console.error('Failed to get magic link details:', error);
+      throw error;
+    }
   }
 
   private async put<T>(url: string, data?: any): Promise<T> {
@@ -168,10 +216,6 @@ class ApiClient {
   // Magic Link Authentication
   async sendMagicLink(request: MagicLinkRequest): Promise<MagicLinkResponse> {
     return this.post<MagicLinkResponse>(API_ENDPOINTS.AUTH.MAGIC_LINK, request);
-  }
-
-  async verifyMagicLink(request: VerifyMagicLinkRequest): Promise<AuthResponse> {
-    return this.post<AuthResponse>(API_ENDPOINTS.AUTH.VERIFY, request);
   }
 
   async registerWithMagicLink(token: string, request: MagicLinkUserRequest): Promise<AuthResponse> {

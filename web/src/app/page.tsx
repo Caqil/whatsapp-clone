@@ -1,27 +1,41 @@
+// src/app/page.tsx
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 
 export default function RootPage() {
   const router = useRouter();
-  const { user, isLoading } = useAuth();
+  const pathname = usePathname();
+  const { user, isLoading, isAuthenticated, isInitialized } = useAuth();
+  const hasRedirected = useRef(false);
 
   useEffect(() => {
-    if (!isLoading) {
-      if (user) {
-        // User is authenticated, redirect to main app
-        router.replace("/chat");
-      } else {
-        // User is not authenticated, redirect to login
-        router.replace("/login");
-      }
+    // Prevent multiple redirects
+    if (hasRedirected.current || !isInitialized || pathname !== "/") {
+      return;
     }
-  }, [user, isLoading, router]);
 
-  // Show loading while checking auth status
+    // Only redirect from the root path
+    if (isAuthenticated && user) {
+      console.log("User authenticated, redirecting to chat");
+      hasRedirected.current = true;
+      router.replace("/chat");
+    } else if (!isLoading && !isAuthenticated) {
+      console.log("User not authenticated, redirecting to login");
+      hasRedirected.current = true;
+      router.replace("/login");
+    }
+  }, [user, isLoading, isAuthenticated, isInitialized, router, pathname]);
+
+  // Don't render anything if we're not on the root path
+  if (pathname !== "/") {
+    return null;
+  }
+
+  // Show loading while checking auth status or redirecting
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="text-center">

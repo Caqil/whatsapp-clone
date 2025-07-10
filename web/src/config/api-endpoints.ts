@@ -97,7 +97,8 @@ export function buildApiUrl(endpoint: string, baseUrl?: string): string {
  * Build WebSocket URL
  */
 export function buildWebSocketUrl(token?: string, baseUrl?: string): string {
-  const base = baseUrl || process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/api';
+  // FIXED: Use HTTP base URL and let socket.io handle the protocol upgrade
+  const base = baseUrl || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
   const wsUrl = `${base}${API_ENDPOINTS.WEBSOCKET}`;
   
   if (token) {
@@ -106,7 +107,6 @@ export function buildWebSocketUrl(token?: string, baseUrl?: string): string {
   
   return wsUrl;
 }
-
 /**
  * Build URL with query parameters
  */
