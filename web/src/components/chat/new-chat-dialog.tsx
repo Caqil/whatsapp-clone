@@ -1,81 +1,88 @@
 "use client";
 
 import React, { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, Users, MessageCircle, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { MessageCircle, Users, Search, Plus, X, Link } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { useGroupManagement } from "@/hooks/use-group-management";
 import type { User } from "@/types/user";
 
 interface NewChatDialogProps {
-  trigger?: React.ReactNode;
+  trigger: React.ReactNode;
   users?: User[];
-  isSearching?: boolean;
-  onSearchUsers?: (query: string) => void;
   onCreateDirectChat?: (userId: string) => void;
   onCreateGroupChat?: (
     name: string,
     userIds: string[],
     description?: string
   ) => void;
+  onJoinViaInvite?: (inviteCode: string) => void;
 }
 
 export function NewChatDialog({
   trigger,
   users = [],
-  isSearching,
-  onSearchUsers,
   onCreateDirectChat,
   onCreateGroupChat,
+  onJoinViaInvite,
 }: NewChatDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("direct");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+  const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [groupName, setGroupName] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
-  const [activeTab, setActiveTab] = useState("direct");
+  const [inviteCode, setInviteCode] = useState("");
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
-    setSearchQuery(query);
-    onSearchUsers?.(query);
-  };
+  const { user } = useAuth();
+  const { joinViaInvite, isLoading } = useGroupManagement();
 
-  const toggleUserSelection = (userId: string) => {
-    const newSelected = new Set(selectedUsers);
-    if (newSelected.has(userId)) {
-      newSelected.delete(userId);
+  // Filter users based on search
+  const filteredUsers = users.filter(
+    (u) =>
+      u.id !== user?.id && // Exclude current user
+      (u.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        u.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        u.username.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const handleUserSelect = (selectedUser: User) => {
+    if (activeTab === "direct") {
+      onCreateDirectChat?.(selectedUser.id);
+      setIsOpen(false);
     } else {
-      newSelected.add(userId);
+      setSelectedUsers((prev) => {
+        const isSelected = prev.some((u) => u.id === selectedUser.id);
+        if (isSelected) {
+          return prev.filter((u) => u.id !== selectedUser.id);
+        } else {
+          return [...prev, selectedUser];
+        }
+      });
     }
-    setSelectedUsers(newSelected);
   };
 
-  const handleCreateDirectChat = (userId: string) => {
-    onCreateDirectChat?.(userId);
-    setIsOpen(false);
-    resetForm();
-  };
-
-  const handleCreateGroupChat = () => {
-    if (groupName.trim() && selectedUsers.size > 0) {
+  const handleCreateGroup = () => {
+    if (groupName.trim() && selectedUsers.length > 0) {
       onCreateGroupChat?.(
         groupName.trim(),
-        Array.from(selectedUsers),
+        selectedUsers.map((u) => u.id),
         groupDescription.trim() || undefined
       );
       setIsOpen(false);
@@ -83,114 +90,103 @@ export function NewChatDialog({
     }
   };
 
-  const resetForm = () => {
-    setSearchQuery("");
-    setSelectedUsers(new Set());
-    setGroupName("");
-    setGroupDescription("");
-    setActiveTab("direct");
+  const handleJoinViaInvite = async () => {
+    if (inviteCode.trim()) {
+      try {
+        await joinViaInvite(inviteCode.trim());
+        setIsOpen(false);
+        resetForm();
+      } catch (error) {
+        // Error is handled in the hook
+      }
+    }
   };
 
-  const filteredUsers = users.filter(
-    (user) =>
-      searchQuery === "" ||
-      user.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const resetForm = () => {
+    setSearchQuery("");
+    setSelectedUsers([]);
+    setGroupName("");
+    setGroupDescription("");
+    setInviteCode("");
+  };
+
+  const removeSelectedUser = (userId: string) => {
+    setSelectedUsers((prev) => prev.filter((u) => u.id !== userId));
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        {trigger || (
-          <Button className="bg-blue-600 hover:bg-blue-700">
-            <MessageCircle className="h-4 w-4 mr-2" />
-            New Chat
-          </Button>
-        )}
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px] max-h-[600px]">
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Start New Chat</DialogTitle>
-          <DialogDescription>
-            Create a direct chat or group conversation
-          </DialogDescription>
+          <DialogTitle>New Chat</DialogTitle>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="direct" className="flex items-center space-x-2">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="direct" className="flex items-center gap-2">
               <MessageCircle className="h-4 w-4" />
-              <span>Direct Chat</span>
+              Direct
             </TabsTrigger>
-            <TabsTrigger value="group" className="flex items-center space-x-2">
+            <TabsTrigger value="group" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
-              <span>Group Chat</span>
+              Group
+            </TabsTrigger>
+            <TabsTrigger value="invite" className="flex items-center gap-2">
+              <Link className="h-4 w-4" />
+              Join
             </TabsTrigger>
           </TabsList>
 
-          {/* Search users */}
-          <div className="relative mt-4">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search users..."
-              value={searchQuery}
-              onChange={handleSearchChange}
-              className="pl-10"
-            />
-          </div>
-
+          {/* Direct Chat Tab */}
           <TabsContent value="direct" className="space-y-4">
-            <ScrollArea className="h-80">
-              {isSearching ? (
-                <div className="flex items-center justify-center p-8">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
-              ) : filteredUsers.length === 0 ? (
-                <div className="flex items-center justify-center p-8 text-center">
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground">No users found</p>
-                    <p className="text-sm text-muted-foreground">
-                      Try searching for a different name or username
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {filteredUsers.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex items-center space-x-3 p-3 rounded-lg hover:bg-muted cursor-pointer transition-colors"
-                      onClick={() => handleCreateDirectChat(user.id)}
-                    >
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={user.avatar} />
-                        <AvatarFallback className="bg-blue-600 text-white">
-                          {user.firstName.charAt(0)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm">
-                          {user.firstName} {user.lastName}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          @{user.username}
-                        </p>
-                      </div>
-                      {user.isOnline && (
-                        <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                      )}
+            <div className="space-y-2">
+              <Label htmlFor="search">Search users</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="search"
+                  placeholder="Search by name or username..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+
+            <ScrollArea className="h-[400px]">
+              <div className="space-y-2">
+                {filteredUsers.map((user) => (
+                  <div
+                    key={user.id}
+                    onClick={() => handleUserSelect(user)}
+                    className="flex items-center gap-3 p-3 hover:bg-accent rounded-lg cursor-pointer"
+                  >
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src={user.avatar} alt={user.firstName} />
+                      <AvatarFallback>
+                        {user.firstName.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <p className="font-medium">
+                        {user.firstName} {user.lastName}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        @{user.username}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
             </ScrollArea>
           </TabsContent>
 
+          {/* Group Chat Tab */}
           <TabsContent value="group" className="space-y-4">
             <div className="space-y-4">
-              <div>
-                <Label htmlFor="groupName">Group Name</Label>
+              <div className="space-y-2">
+                <Label htmlFor="groupName">Group name</Label>
                 <Input
                   id="groupName"
                   placeholder="Enter group name..."
@@ -199,71 +195,133 @@ export function NewChatDialog({
                 />
               </div>
 
-              <div>
-                <Label htmlFor="groupDescription">Description (Optional)</Label>
+              <div className="space-y-2">
+                <Label htmlFor="groupDescription">Description (optional)</Label>
                 <Textarea
                   id="groupDescription"
                   placeholder="Enter group description..."
                   value={groupDescription}
                   onChange={(e) => setGroupDescription(e.target.value)}
-                  rows={2}
+                  rows={3}
                 />
               </div>
 
-              <div>
-                <Label>Select Members ({selectedUsers.size} selected)</Label>
-                <ScrollArea className="h-60 border rounded-md p-2">
-                  {isSearching ? (
-                    <div className="flex items-center justify-center p-8">
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    </div>
-                  ) : filteredUsers.length === 0 ? (
-                    <div className="flex items-center justify-center p-8 text-center">
-                      <p className="text-muted-foreground">No users found</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {filteredUsers.map((user) => (
-                        <div
-                          key={user.id}
-                          className="flex items-center space-x-3 p-2 rounded-lg hover:bg-muted cursor-pointer transition-colors"
-                          onClick={() => toggleUserSelection(user.id)}
+              <Separator />
+
+              <div className="space-y-2">
+                <Label>Selected members ({selectedUsers.length})</Label>
+                {selectedUsers.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedUsers.map((user) => (
+                      <Badge
+                        key={user.id}
+                        variant="secondary"
+                        className="flex items-center gap-1"
+                      >
+                        {user.firstName} {user.lastName}
+                        <button
+                          onClick={() => removeSelectedUser(user.id)}
+                          className="ml-1 hover:text-destructive"
                         >
-                          <Checkbox
-                            checked={selectedUsers.has(user.id)}
-                            onChange={() => toggleUserSelection(user.id)}
-                          />
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={user.avatar} />
-                            <AvatarFallback className="bg-blue-600 text-white text-xs">
-                              {user.firstName.charAt(0)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm">
-                              {user.firstName} {user.lastName}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              @{user.username}
-                            </p>
-                          </div>
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="memberSearch">Add members</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="memberSearch"
+                    placeholder="Search users to add..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+
+              <ScrollArea className="h-[300px]">
+                <div className="space-y-2">
+                  {filteredUsers.map((user) => {
+                    const isSelected = selectedUsers.some(
+                      (u) => u.id === user.id
+                    );
+                    return (
+                      <div
+                        key={user.id}
+                        onClick={() => handleUserSelect(user)}
+                        className="flex items-center gap-3 p-3 hover:bg-accent rounded-lg cursor-pointer"
+                      >
+                        <Checkbox checked={isSelected} />
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={user.avatar} alt={user.firstName} />
+                          <AvatarFallback>
+                            {user.firstName.charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1">
+                          <p className="font-medium text-sm">
+                            {user.firstName} {user.lastName}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            @{user.username}
+                          </p>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </ScrollArea>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateGroup}
+                disabled={!groupName.trim() || selectedUsers.length === 0}
+              >
+                Create Group
+              </Button>
+            </div>
+          </TabsContent>
+
+          {/* Join via Invite Tab */}
+          <TabsContent value="invite" className="space-y-4">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="inviteCode">Invite code or link</Label>
+                <Input
+                  id="inviteCode"
+                  placeholder="Enter invite code or paste invite link..."
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                />
+              </div>
+
+              <div className="text-sm text-muted-foreground">
+                You can join a group by entering the invite code or pasting the
+                full invite link.
               </div>
             </div>
 
-            <DialogFooter>
-              <Button
-                onClick={handleCreateGroupChat}
-                disabled={!groupName.trim() || selectedUsers.size === 0}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                Create Group Chat
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsOpen(false)}>
+                Cancel
               </Button>
-            </DialogFooter>
+              <Button
+                onClick={handleJoinViaInvite}
+                disabled={!inviteCode.trim() || isLoading}
+              >
+                {isLoading ? "Joining..." : "Join Group"}
+              </Button>
+            </div>
           </TabsContent>
         </Tabs>
       </DialogContent>

@@ -1,4 +1,4 @@
-// src/lib/api.ts - Complete API client matching your curl documentation
+
 import axios, { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type { 
   AuthResponse, 
@@ -26,6 +26,7 @@ import type {
 import type { ApiResponse, UploadResult } from '@/types/api';
 import { getStoredTokens, removeStoredTokens, setStoredTokens } from './storage';
 import { API_ENDPOINTS } from '@/config/api-endpoints';
+import { groupApi } from './api/group-api';
 
 // Enhanced API Client Class
 class ApiClient {
@@ -428,6 +429,29 @@ export const userApi = {
   getProfile: () => apiClient.getUserProfile(),
   updateProfile: (request: UserUpdateRequest) => apiClient.updateUserProfile(request),
   searchUsers: (query: string) => apiClient.searchUsers(query),
+};
+export const groupsApi = {
+  group: groupApi,
+  
+  // Convenience methods
+  getGroupInfo: groupApi.getGroupInfo.bind(groupApi),
+  updateGroupInfo: groupApi.updateGroupInfo.bind(groupApi),
+  updateGroupSettings: groupApi.updateGroupSettings.bind(groupApi),
+  addMembers: groupApi.addMembers.bind(groupApi),
+  removeMember: groupApi.removeMember.bind(groupApi),
+  leaveGroup: groupApi.leaveGroup.bind(groupApi),
+  changeRole: groupApi.changeRole.bind(groupApi),
+  createInvite: groupApi.createInvite.bind(groupApi),
+  getGroupInvites: groupApi.getGroupInvites.bind(groupApi),
+  revokeInvite: groupApi.revokeInvite.bind(groupApi),
+  joinViaInvite: groupApi.joinViaInvite.bind(groupApi),
+  getInviteInfo: groupApi.getInviteInfo.bind(groupApi),
+  pinGroup: groupApi.pinGroup.bind(groupApi),
+  unpinGroup: groupApi.unpinGroup.bind(groupApi),
+  muteGroup: groupApi.muteGroup.bind(groupApi),
+  unmuteGroup: groupApi.unmuteGroup.bind(groupApi),
+  archiveGroup: groupApi.archiveGroup.bind(groupApi),
+  unarchiveGroup: groupApi.unarchiveGroup.bind(groupApi),
 };
 
 export const chatApi = {

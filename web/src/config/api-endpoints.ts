@@ -75,6 +75,34 @@ export const API_ENDPOINTS = {
     // Search
     SEARCH: (chatId: string) => `/messages/chat/${chatId}/search`,
   },
+  GROUPS: {
+    BASE: '/groups',
+    BY_ID: (groupId: string) => `/groups/${groupId}`,
+    
+    // Group information
+    INFO: (groupId: string) => `/groups/${groupId}/info`,
+    SETTINGS: (groupId: string) => `/groups/${groupId}/settings`,
+    
+    // Member management
+    MEMBERS: (groupId: string) => `/groups/${groupId}/members`,
+    REMOVE_MEMBER: (groupId: string, userId: string) => `/groups/${groupId}/members/${userId}`,
+    LEAVE: (groupId: string) => `/groups/${groupId}/leave`,
+    CHANGE_ROLE: (groupId: string, userId: string) => `/groups/${groupId}/members/${userId}/role`,
+    
+    // Group invitations
+    INVITES: (groupId: string) => `/groups/${groupId}/invites`,
+    REVOKE_INVITE: (groupId: string, inviteId: string) => `/groups/${groupId}/invites/${inviteId}`,
+    JOIN: '/groups/join',
+    INVITE_INFO: (inviteCode: string) => `/groups/invites/${inviteCode}/info`,
+    
+    // Group actions
+    PIN: (groupId: string) => `/groups/${groupId}/pin`,
+    UNPIN: (groupId: string) => `/groups/${groupId}/unpin`,
+    MUTE: (groupId: string) => `/groups/${groupId}/mute`,
+    UNMUTE: (groupId: string) => `/groups/${groupId}/unmute`,
+    ARCHIVE: (groupId: string) => `/groups/${groupId}/archive`,
+    UNARCHIVE: (groupId: string) => `/groups/${groupId}/unarchive`,
+  },
 
   // ========== WebSocket Endpoint ==========
   WEBSOCKET: '/ws',
@@ -125,7 +153,33 @@ export function buildUrlWithParams(endpoint: string, params: Record<string, any>
 }
 
 // ========== Endpoint Helper Functions ==========
-
+export const groupEndpoints = {
+  // Group information
+  getGroupInfo: (groupId: string) => API_ENDPOINTS.GROUPS.INFO(groupId),
+  updateGroupInfo: (groupId: string) => API_ENDPOINTS.GROUPS.INFO(groupId),
+  updateGroupSettings: (groupId: string) => API_ENDPOINTS.GROUPS.SETTINGS(groupId),
+  
+  // Member management
+  addMembers: (groupId: string) => API_ENDPOINTS.GROUPS.MEMBERS(groupId),
+  removeMember: (groupId: string, userId: string) => API_ENDPOINTS.GROUPS.REMOVE_MEMBER(groupId, userId),
+  leaveGroup: (groupId: string) => API_ENDPOINTS.GROUPS.LEAVE(groupId),
+  changeRole: (groupId: string, userId: string) => API_ENDPOINTS.GROUPS.CHANGE_ROLE(groupId, userId),
+  
+  // Group invitations
+  createInvite: (groupId: string) => API_ENDPOINTS.GROUPS.INVITES(groupId),
+  getGroupInvites: (groupId: string) => API_ENDPOINTS.GROUPS.INVITES(groupId),
+  revokeInvite: (groupId: string, inviteId: string) => API_ENDPOINTS.GROUPS.REVOKE_INVITE(groupId, inviteId),
+  joinViaInvite: () => API_ENDPOINTS.GROUPS.JOIN,
+  getInviteInfo: (inviteCode: string) => API_ENDPOINTS.GROUPS.INVITE_INFO(inviteCode),
+  
+  // Group actions
+  pinGroup: (groupId: string) => API_ENDPOINTS.GROUPS.PIN(groupId),
+  unpinGroup: (groupId: string) => API_ENDPOINTS.GROUPS.UNPIN(groupId),
+  muteGroup: (groupId: string) => API_ENDPOINTS.GROUPS.MUTE(groupId),
+  unmuteGroup: (groupId: string) => API_ENDPOINTS.GROUPS.UNMUTE(groupId),
+  archiveGroup: (groupId: string) => API_ENDPOINTS.GROUPS.ARCHIVE(groupId),
+  unarchiveGroup: (groupId: string) => API_ENDPOINTS.GROUPS.UNARCHIVE(groupId),
+};
 export const authEndpoints = {
   // Magic Link Authentication
   sendMagicLink: () => API_ENDPOINTS.AUTH.MAGIC_LINK,

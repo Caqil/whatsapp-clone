@@ -4,6 +4,7 @@ package main
 import (
 	"bro-chat/internal/infrastructure/config"
 	"bro-chat/internal/infrastructure/database"
+	"bro-chat/internal/infrastructure/database/repositories"
 	mongoRepo "bro-chat/internal/infrastructure/database/repositories"
 	"bro-chat/internal/interfaces/handlers"
 	"bro-chat/internal/interfaces/middleware"
@@ -30,7 +31,7 @@ func main() {
 	userRepo := mongoRepo.NewUserRepository(db)
 	chatRepo := mongoRepo.NewChatRepository(db)
 	messageRepo := mongoRepo.NewMessageRepository(db)
-
+	groupRepo := repositories.NewGroupRepository(db)
 	// Initialize new auth repositories
 	magicLinkRepo := mongoRepo.NewMagicLinkRepository(db)
 	qrCodeRepo := mongoRepo.NewQRCodeRepository(db)
@@ -48,7 +49,7 @@ func main() {
 	userUsecase := usecases.NewUserUsecase(userRepo)
 	chatUsecase := usecases.NewChatUsecase(chatRepo, userRepo)
 	messageUsecase := usecases.NewMessageUsecase(messageRepo, chatRepo, userRepo, hub)
-
+	groupUsecase := usecases.NewGroupUsecase(groupRepo, userRepo, chatRepo, hub)
 	// Initialize new auth usecase
 	authUsecase := usecases.NewAuthUsecase(
 		userRepo,
@@ -66,7 +67,7 @@ func main() {
 	chatHandler := handlers.NewChatHandler(chatUsecase)
 	messageHandler := handlers.NewMessageHandler(messageUsecase, fileUploadService)
 	wsHandler := handlers.NewWebSocketHandler(hub, messageUsecase)
-
+	groupHandler := handlers.NewGroupHandler(groupUsecase)
 	// Setup Gin router
 	r := gin.Default()
 	r.Use(middleware.CORS())
@@ -112,20 +113,32 @@ func main() {
 	api := r.Group("/api")
 	api.Use(middleware.AuthMiddleware())
 	{
-		// User routes
-		users := api.Group("/users")
+		groups := api.Group("/groups")
 		{
-			users.GET("/profile", userHandler.GetProfile)
-			users.PUT("/profile", userHandler.UpdateProfile)
-			users.GET("/search", userHandler.SearchUsers)
-		}
+			// Group information
+			groups.GET("/:groupId/info", groupHandler.GetGroupInfo)
+			groups.PUT("/:groupId/info", groupHandler.UpdateGroupInfo)
+			groups.PUT("/:groupId/settings", groupHandler.UpdateGroupSettings)
 
-		// Chat routes
-		chats := api.Group("/chats")
-		{
-			chats.POST("", chatHandler.CreateChat)
-			chats.GET("", chatHandler.GetUserChats)
-			chats.GET("/:chatId", chatHandler.GetChat)
+			// Member management
+			groups.POST("/:groupId/members", groupHandler.AddMembers)
+			groups.DELETE("/:groupId/members/:userId", groupHandler.RemoveMember)
+			groups.POST("/:groupId/leave", groupHandler.LeaveGroup)
+			groups.PUT("/:groupId/members/:userId/role", groupHandler.ChangeRole)
+
+			// Group invitations
+			groups.POST("/:groupId/invites", groupHandler.CreateInvite)
+			groups.GET("/:groupId/invites", groupHandler.GetGroupInvites)
+			groups.DELETE("/:groupId/invites/:inviteId", groupHandler.RevokeInvite)
+			groups.POST("/join", groupHandler.JoinViaInvite)
+
+			// Group actions
+			groups.POST("/:groupId/pin", groupHandler.PinGroup)
+			groups.POST("/:groupId/unpin", groupHandler.UnpinGroup)
+			groups.POST("/:groupId/mute", groupHandler.MuteGroup)
+			groups.POST("/:groupId/unmute", groupHandler.UnmuteGroup)
+			groups.POST("/:groupId/archive", groupHandler.ArchiveGroup)
+			groups.POST("/:groupId/unarchive", groupHandler.UnarchiveGroup)
 		}
 
 		// Message routes
@@ -162,7 +175,7 @@ func main() {
 		// WebSocket route
 		api.GET("/ws", wsHandler.HandleWebSocket)
 	}
-
+	r.GET("/api/groups/invites/:inviteCode/info", groupHandler.GetInviteInfo)
 	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

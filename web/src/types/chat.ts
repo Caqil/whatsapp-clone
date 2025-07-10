@@ -17,6 +17,20 @@ export interface Chat {
   lastMessage?: Message;
   createdAt: string;
   updatedAt: string;
+
+  owner?: string;
+  admins?: string[];
+  settings?: {
+    whoCanSendMessages: 'everyone' | 'admins';
+    whoCanEditInfo: 'everyone' | 'admins';
+    whoCanAddMembers: 'everyone' | 'admins';
+    disappearingMessages: boolean;
+    disappearingTime?: number;
+  };
+  isPinned: boolean;
+  isMuted: boolean;
+  mutedUntil?: string;
+  isArchived: boolean;
 }
 
 // Extended chat with populated user data

@@ -74,6 +74,20 @@ const (
 	WSError WSMessageType = "error"
 	WSPong  WSMessageType = "pong"
 	WSPing  WSMessageType = "ping"
+
+	WSMemberAdded          WSMessageType = "member_added"
+	WSMemberRemoved        WSMessageType = "member_removed"
+	WSMemberLeft           WSMessageType = "member_left"
+	WSMemberJoined         WSMessageType = "member_joined"
+	WSMemberRoleChanged    WSMessageType = "member_role_changed"
+	WSGroupInfoUpdated     WSMessageType = "group_info_updated"
+	WSGroupSettingsUpdated WSMessageType = "group_settings_updated"
+	WSGroupPinned          WSMessageType = "group_pinned"
+	WSGroupMuted           WSMessageType = "group_muted"
+	WSGroupArchived        WSMessageType = "group_archived"
+	WSInviteCreated        WSMessageType = "invite_created"
+	WSInviteRevoked        WSMessageType = "invite_revoked"
+	WSInviteUsed           WSMessageType = "invite_used"
 )
 
 // Payload structures
@@ -130,6 +144,23 @@ type FileUploadPayload struct {
 	Progress int                `json:"progress,omitempty"`
 	FileURL  string             `json:"fileUrl,omitempty"`
 	Error    string             `json:"error,omitempty"`
+}
+type MemberUpdatePayload struct {
+	GroupID primitive.ObjectID `json:"groupId"`
+	User    entities.User      `json:"user"`
+	Role    string             `json:"role,omitempty"`
+}
+
+type GroupUpdatePayload struct {
+	GroupID primitive.ObjectID `json:"groupId"`
+	Updates interface{}        `json:"updates"`
+}
+
+type InviteUpdatePayload struct {
+	GroupID    primitive.ObjectID `json:"groupId"`
+	InviteID   primitive.ObjectID `json:"inviteId"`
+	InviteCode string             `json:"inviteCode,omitempty"`
+	Action     string             `json:"action"` // created, revoked, used
 }
 
 const (

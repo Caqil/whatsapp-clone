@@ -179,7 +179,6 @@ export function Sidebar({
                 </Button>
               }
               users={users}
-              onSearchUsers={onSearchUsers}
               onCreateDirectChat={onCreateDirectChat}
               onCreateGroupChat={onCreateGroupChat}
             />

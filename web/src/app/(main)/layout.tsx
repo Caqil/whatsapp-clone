@@ -10,7 +10,7 @@ import { useChat } from "@/hooks/use-chat";
 import { useSocket } from "@/hooks/use-socket";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-
+import { useGroupManagement } from "@/hooks/use-group-management";
 export default function MainLayout({
   children,
 }: {
@@ -25,12 +25,12 @@ export default function MainLayout({
     createGroupChat,
     isLoading: chatLoading,
   } = useChat();
-  const { connect, isConnected } = useSocket();
+  const { connect, isConnected, onGroupEvent } = useSocket(); // ADD onGroupEvent
+  const { joinViaInvite } = useGroupManagement(); // ADD THIS
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
-
   // Check if mobile
   useEffect(() => {
     const checkMobile = () => {
@@ -48,7 +48,32 @@ export default function MainLayout({
       router.push("/login");
     }
   }, [isAuthenticated, authLoading, router]);
+  useEffect(() => {
+    if (isConnected) {
+      // Listen for group events and reload chats when needed
+      const unsubscribers = [
+        onGroupEvent("member_added", () => {
+          loadChats(); // Reload chats to update member lists
+        }),
+        onGroupEvent("member_removed", () => {
+          loadChats();
+        }),
+        onGroupEvent("group_info_updated", () => {
+          loadChats();
+        }),
+        onGroupEvent("member_joined", () => {
+          loadChats();
+        }),
+        onGroupEvent("member_left", () => {
+          loadChats();
+        }),
+      ];
 
+      return () => {
+        unsubscribers.forEach((unsub) => unsub());
+      };
+    }
+  }, [isConnected, onGroupEvent, loadChats]);
   // Load initial data
   useEffect(() => {
     if (isAuthenticated && user) {

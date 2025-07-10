@@ -1,24 +1,31 @@
 "use client";
 
 import React from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { MoreVertical, Phone, Video, Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Phone,
+  Video,
+  Search,
+  MoreVertical,
+  Users,
+  Crown,
+  Shield,
+} from "lucide-react";
+import { GroupActionsMenu } from "@/components/group/group-actions-menu";
+import { GroupInfoDialog } from "@/components/group/group-info-dialog";
+import { GroupSettingsDialog } from "@/components/group/group-settings-dialog";
+import { GroupInviteDialog } from "@/components/group/group-invite-dialog";
 import type { ChatWithUsers } from "@/types/chat";
-import type { User } from "@/types/user";
 
 interface ChatHeaderProps {
-  chat: ChatWithUsers | null;
+  chat: ChatWithUsers;
   onCall?: () => void;
   onVideoCall?: () => void;
   onSearch?: () => void;
   onChatInfo?: () => void;
+  onLeaveGroup?: () => void;
 }
 
 export function ChatHeader({
@@ -27,72 +34,112 @@ export function ChatHeader({
   onVideoCall,
   onSearch,
   onChatInfo,
+  onLeaveGroup,
 }: ChatHeaderProps) {
-  if (!chat) {
-    return (
-      <div className="h-16 border-b border-border bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">
-          Select a chat to start messaging
-        </p>
-      </div>
-    );
-  }
+  const isGroup = chat.type === "group";
+  const otherParticipant = isGroup
+    ? null
+    : chat.participants.find((p) => p.id !== chat.createdBy);
 
-  const getChatName = () => {
-    if (chat.type === "group") {
-      return chat.name || "Group Chat";
-    }
-    // For direct chats, get the other participant
-    const otherParticipant = chat.participants.find(
-      (p) => p.id !== chat.createdBy
-    );
-    return otherParticipant
-      ? `${otherParticipant.firstName} ${otherParticipant.lastName}`
-      : "Unknown";
-  };
+  // For groups, show member count and online status
+  const onlineCount = isGroup
+    ? chat.participants.filter((p) => p.isOnline).length
+    : 0;
 
-  const getChatAvatar = () => {
-    if (chat.avatar) return chat.avatar;
-    if (chat.type === "group") return "";
-    const otherParticipant = chat.participants.find(
-      (p) => p.id !== chat.createdBy
-    );
-    return otherParticipant?.avatar || "";
-  };
-
-  const getStatusText = () => {
-    if (chat.type === "group") {
-      return `${chat.participants.length} participants`;
-    }
-    // For direct chats, show online status or typing
-    if (chat.isTyping) return "typing...";
-    const otherParticipant = chat.participants.find(
-      (p) => p.id !== chat.createdBy
-    );
-    return otherParticipant?.isOnline ? "online" : "last seen recently";
-  };
+  // Check if current user is admin/owner
+  const isAdmin = chat.admins?.includes(chat.createdBy) || false;
+  const isOwner = chat.owner === chat.createdBy;
 
   return (
-    <div className="h-16 border-b border-border bg-background flex items-center justify-between px-4">
-      {/* Left side - Avatar and info */}
-      <div className="flex items-center space-x-3 flex-1 min-w-0">
+    <div className="flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="flex items-center gap-3">
+        {/* Avatar */}
         <Avatar className="h-10 w-10">
-          <AvatarImage src={getChatAvatar()} />
-          <AvatarFallback className="bg-blue-600 text-white">
-            {getChatName().charAt(0).toUpperCase()}
+          <AvatarImage
+            src={
+              chat.avatar || (isGroup ? undefined : otherParticipant?.avatar)
+            }
+            alt={
+              chat.name ||
+              `${otherParticipant?.firstName} ${otherParticipant?.lastName}`
+            }
+          />
+          <AvatarFallback>
+            {isGroup
+              ? chat.name?.charAt(0).toUpperCase()
+              : `${otherParticipant?.firstName?.[0]}${otherParticipant?.lastName?.[0]}`}
           </AvatarFallback>
         </Avatar>
 
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-sm truncate">{getChatName()}</h3>
-          <p className="text-xs text-muted-foreground truncate">
-            {getStatusText()}
-          </p>
+        {/* Chat Info */}
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold">
+              {isGroup
+                ? chat.name
+                : `${otherParticipant?.firstName} ${otherParticipant?.lastName}`}
+            </h2>
+
+            {/* Group indicators */}
+            {isGroup && (
+              <div className="flex items-center gap-1">
+                <Users className="h-4 w-4 text-muted-foreground" />
+                {isOwner && <Crown className="h-4 w-4 text-yellow-500" />}
+                {isAdmin && !isOwner && (
+                  <Shield className="h-4 w-4 text-blue-500" />
+                )}
+              </div>
+            )}
+
+            {/* Status indicators */}
+            {chat.isPinned && (
+              <Badge variant="outline" className="text-xs">
+                Pinned
+              </Badge>
+            )}
+            {chat.isMuted && (
+              <Badge variant="outline" className="text-xs">
+                Muted
+              </Badge>
+            )}
+          </div>
+
+          {/* Status line */}
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {isGroup ? (
+              <>
+                <span>{chat.participants.length} members</span>
+                {onlineCount > 0 && (
+                  <>
+                    <span>•</span>
+                    <span>{onlineCount} online</span>
+                  </>
+                )}
+              </>
+            ) : (
+              <span>
+                {otherParticipant?.isOnline ? "Online" : "Last seen recently"}
+              </span>
+            )}
+
+            {/* Typing indicator */}
+            {chat.isTyping && (
+              <>
+                <span>•</span>
+                <span className="text-primary">
+                  {isGroup && chat.typingUsers.length > 0
+                    ? `${chat.typingUsers[0].firstName} is typing...`
+                    : "Typing..."}
+                </span>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Right side - Action buttons */}
-      <div className="flex items-center space-x-1">
+      {/* Actions */}
+      <div className="flex items-center gap-2">
+        {/* Call buttons */}
         <Button variant="ghost" size="sm" onClick={onCall}>
           <Phone className="h-4 w-4" />
         </Button>
@@ -105,22 +152,20 @@ export function ChatHeader({
           <Search className="h-4 w-4" />
         </Button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm">
-              <MoreVertical className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onChatInfo}>Chat info</DropdownMenuItem>
-            <DropdownMenuItem>Select messages</DropdownMenuItem>
-            <DropdownMenuItem>Mute notifications</DropdownMenuItem>
-            <DropdownMenuItem>Clear chat</DropdownMenuItem>
-            <DropdownMenuItem className="text-destructive">
-              Delete chat
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Group-specific actions */}
+        {isGroup ? (
+          <GroupActionsMenu
+            chat={chat}
+            onGroupInfo={() => {}}
+            onGroupSettings={() => {}}
+            onGroupInvites={() => {}}
+            onLeaveGroup={onLeaveGroup}
+          />
+        ) : (
+          <Button variant="ghost" size="sm" onClick={onChatInfo}>
+            <MoreVertical className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   );

@@ -24,6 +24,15 @@ type Chat struct {
 	LastMessage  *Message             `bson:"last_message,omitempty" json:"lastMessage,omitempty"`
 	CreatedAt    time.Time            `bson:"created_at" json:"createdAt"`
 	UpdatedAt    time.Time            `bson:"updated_at" json:"updatedAt"`
+
+	Admins     []primitive.ObjectID `bson:"admins,omitempty" json:"admins,omitempty"`
+	Owner      *primitive.ObjectID  `bson:"owner,omitempty" json:"owner,omitempty"`
+	Settings   *GroupSettings       `bson:"settings,omitempty" json:"settings,omitempty"`
+	IsPinned   bool                 `bson:"is_pinned" json:"isPinned"`
+	IsMuted    bool                 `bson:"is_muted" json:"isMuted"`
+	MutedUntil *time.Time           `bson:"muted_until,omitempty" json:"mutedUntil,omitempty"`
+	IsArchived bool                 `bson:"is_archived" json:"isArchived"`
+
 }
 
 type CreateChatRequest struct {

@@ -29,12 +29,35 @@ interface UseSocketState {
   lastMessageTime: number;
   messageQueue: WSMessage[];
 }
+export type GroupEventType = 
+  | 'member_added'
+  | 'member_removed'
+  | 'member_left'
+  | 'member_joined'
+  | 'member_role_changed'
+  | 'group_info_updated'
+  | 'group_settings_updated'
+  | 'group_pinned'
+  | 'group_muted'
+  | 'group_archived'
+  | 'invite_created'
+  | 'invite_revoked'
+  | 'invite_used';
 
+// ADD group event callbacks
+export type GroupEventCallback = (payload: any) => void;
 interface UseSocketActions {
   connect: () => void;
   disconnect: () => void;
   sendMessage: (message: WSMessage) => void;
-  
+
+  // Group event subscriptions
+  onGroupEvent: (eventType: GroupEventType, callback: GroupEventCallback) => () => void;
+  onMemberAdded: (callback: GroupEventCallback) => () => void;
+  onMemberRemoved: (callback: GroupEventCallback) => () => void;
+  onGroupInfoUpdated: (callback: GroupEventCallback) => () => void;
+  onInviteCreated: (callback: GroupEventCallback) => () => void;
+
   // Event subscriptions
   onMessage: (callback: (message: WSMessage) => void) => () => void;
   onNewMessage: (callback: (payload: NewMessagePayload) => void) => () => void;
@@ -103,6 +126,43 @@ export function useSocket(): UseSocketState & UseSocketActions {
       });
     }
   }, []);
+const onGroupEvent = useCallback((eventType: GroupEventType, callback: GroupEventCallback) => {
+    if (!state.socket) return () => {};
+
+    const handler = (data: any) => {
+      try {
+        const message = JSON.parse(data);
+        if (message.type === eventType) {
+          callback(message.payload);
+        }
+      } catch (error) {
+        console.error('Error parsing group event:', error);
+      }
+    };
+
+    state.socket.addEventListener('message', handler);
+    
+    return () => {
+      state.socket?.removeEventListener('message', handler);
+    };
+  }, [state.socket]);
+
+  // ADD specific group event handlers
+  const onMemberAdded = useCallback((callback: GroupEventCallback) => {
+    return onGroupEvent('member_added', callback);
+  }, [onGroupEvent]);
+
+  const onMemberRemoved = useCallback((callback: GroupEventCallback) => {
+    return onGroupEvent('member_removed', callback);
+  }, [onGroupEvent]);
+
+  const onGroupInfoUpdated = useCallback((callback: GroupEventCallback) => {
+    return onGroupEvent('group_info_updated', callback);
+  }, [onGroupEvent]);
+
+  const onInviteCreated = useCallback((callback: GroupEventCallback) => {
+    return onGroupEvent('invite_created', callback);
+  }, [onGroupEvent]);
 
   // ========== WebSocket Message Handling ==========
 
@@ -505,7 +565,11 @@ export function useSocket(): UseSocketState & UseSocketActions {
     connect,
     disconnect,
     sendMessage,
-    
+        onGroupEvent,
+    onMemberAdded,
+    onMemberRemoved,
+    onGroupInfoUpdated,
+    onInviteCreated,
     // Event subscriptions
     onMessage,
     onNewMessage,
